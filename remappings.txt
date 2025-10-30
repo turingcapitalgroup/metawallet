@@ -1,1 +1,4 @@
-forge-std-1.11.0/=dependencies/forge-std-1.11.0/
+erc7579-minimal/=dependencies/erc7579-minimal-1.0/src/
+forge-std-1.11.0/=dependencies/forge-std-1.11.0/src/
+kam/=dependencies/kam-1.0/src/
+solady/=dependencies/solady-0.1.26/src/
