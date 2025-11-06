@@ -56,20 +56,43 @@ abstract contract ERC7540 is ERC4626 {
     /*                          STORAGE                           */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
-    /// @notice Saves the ERC7540 deposit requests when calling `requestDeposit`
-    mapping(address => ERC7540_Request) internal _pendingDepositRequest;
+    struct ERC7540Storage {
+        /// @notice Saves the ERC7540 deposit requests when calling `requestDeposit`
+        mapping(address => ERC7540_Request) pendingDepositRequest;
 
-    /// @notice Saves the ERC7540 redeem requests when calling `requestRedeem`
-    mapping(address => ERC7540_Request) internal _pendingRedeemRequest;
+        /// @notice Saves the ERC7540 redeem requests when calling `requestRedeem`
+        mapping(address => ERC7540_Request) pendingRedeemRequest;
 
-    /// @notice Saves the result of the deposit after the request has been processed
-    mapping(address => ERC7540_FilledRequest) internal _claimableDepositRequest;
+        /// @notice Saves the result of the deposit after the request has been processed
+        mapping(address => ERC7540_FilledRequest) claimableDepositRequest;
 
-    /// @notice Saves the result of the redeem after the request has been processed
-    mapping(address => ERC7540_FilledRequest) internal _claimableRedeemRequest;
+        /// @notice Saves the result of the redeem after the request has been processed
+        mapping(address => ERC7540_FilledRequest) claimableRedeemRequest;
 
-    /// @notice ERC7540 operator approvals
-    mapping(address controller => mapping(address operator => bool)) public isOperator;
+        /// @notice ERC7540 operator approvals
+        mapping(address controller => mapping(address operator => bool)) isOperator;
+
+        uint256 totalPendingDepositRequests;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("metawallet.storage.erc7540")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ERC7540_STORAGE_LOCATION =
+        0x1f258c11921df783aee40e51a8bea706dacc811ab5bbdb895d3bfcffe1a3ff00;
+
+    function _getERC7540Storage() private pure returns (ERC7540Storage storage $) {
+        assembly {
+            $.slot := ERC7540_STORAGE_LOCATION
+        }
+    }
+
+    function totalPendingDepositRequests() public view returns (uint256) {
+        ERC7540Storage storage $ = _getERC7540Storage();
+        return $.totalPendingDepositRequests;
+    }
+
+    function totalAssets() public view virtual override returns (uint256) {
+        return super.totalAssets() - totalPendingDepositRequests();
+    }
 
     /// @dev Preview functions for ERC-7540 vaults revert
     function previewDeposit(uint256 assets) public pure override returns (uint256 shares) {
@@ -101,7 +124,8 @@ abstract contract ERC7540 is ERC4626 {
 
     /// @dev The deposit amount is limited by the claimable deposit requests of the user
     function maxDeposit(address to) public view virtual override returns (uint256 assets) {
-        return _claimableDepositRequest[to].assets;
+        ERC7540Storage storage $ = _getERC7540Storage();
+        return $.claimableDepositRequest[to].assets;
     }
 
     /// @dev The mint amount is limited by the claimable deposit requests of the user
@@ -116,7 +140,8 @@ abstract contract ERC7540 is ERC4626 {
 
     /// @dev The redeem amount is limited by the claimable redeem requests of the user
     function maxRedeem(address owner) public view virtual override returns (uint256 shares) {
-        return _claimableRedeemRequest[owner].shares;
+        ERC7540Storage storage $ = _getERC7540Storage();
+        return $.claimableRedeemRequest[owner].shares;
     }
 
     /// @dev Transfers assets from sender into the Vault and submits a Request for asynchronous deposit.
@@ -131,7 +156,11 @@ abstract contract ERC7540 is ERC4626 {
     /// @param owner the source of the deposit assets
     ///
     /// NOTE: most implementations will require pre-approval of the Vault with the Vault's underlying asset token.
-    function requestDeposit(uint256 assets, address controller, address owner)
+    function requestDeposit(
+        uint256 assets,
+        address controller,
+        address owner
+    )
         public
         virtual
         returns (uint256 requestId)
@@ -151,15 +180,20 @@ abstract contract ERC7540 is ERC4626 {
     /// @param owner the source of the shares to be redeemed
     ///
     /// NOTE: most implementations will require pre-approval of the Vault with the Vault's share token.
-    function requestRedeem(uint256 shares, address controller, address owner)
+    function requestRedeem(
+        uint256 shares,
+        address controller,
+        address owner
+    )
         public
         virtual
         returns (uint256 requestId)
     {
         if (shares == 0) revert InvalidZeroShares();
+        ERC7540Storage storage $ = _getERC7540Storage();
         // If msg.sender is operator of owner, the transfer is executed as if
         // the sender is the owner, to bypass the allowance check
-        address sender = isOperator[owner][msg.sender] ? owner : msg.sender;
+        address sender = $.isOperator[owner][msg.sender] ? owner : msg.sender;
         return _requestRedeem(shares, controller, sender, msg.sender);
     }
 
@@ -177,8 +211,9 @@ abstract contract ERC7540 is ERC4626 {
     /// - controller MUST equal msg.sender unless the controller has approved the msg.sender as an operator.
     function deposit(uint256 assets, address receiver, address controller) public virtual returns (uint256 shares) {
         _validateController(controller);
+        ERC7540Storage storage $ = _getERC7540Storage();
         if (assets > maxDeposit(controller)) revert DepositMoreThanMax();
-        ERC7540_FilledRequest memory claimable = _claimableDepositRequest[controller];
+        ERC7540_FilledRequest memory claimable = $.claimableDepositRequest[controller];
         shares = claimable.convertToSharesUp(assets);
         (shares,) = _deposit(assets, shares, receiver, controller);
     }
@@ -198,7 +233,8 @@ abstract contract ERC7540 is ERC4626 {
     function mint(uint256 shares, address receiver, address controller) public virtual returns (uint256 assets) {
         _validateController(controller);
         if (shares > maxMint(controller)) revert MintMoreThanMax();
-        ERC7540_FilledRequest memory claimable = _claimableDepositRequest[controller];
+        ERC7540Storage storage $ = _getERC7540Storage();
+        ERC7540_FilledRequest memory claimable = $.claimableDepositRequest[controller];
         assets = claimable.convertToAssetsUp(shares);
         (, assets) = _deposit(assets, shares, receiver, controller);
     }
@@ -212,7 +248,8 @@ abstract contract ERC7540 is ERC4626 {
     function redeem(uint256 shares, address to, address controller) public virtual override returns (uint256 assets) {
         if (shares > maxRedeem(controller)) revert RedeemMoreThanMax();
         _validateController(controller);
-        ERC7540_FilledRequest memory claimable = _claimableRedeemRequest[controller];
+        ERC7540Storage storage $ = _getERC7540Storage();
+        ERC7540_FilledRequest memory claimable = $.claimableRedeemRequest[controller];
         assets = claimable.convertToAssets(shares);
         (assets,) = _withdraw(assets, shares, to, controller);
     }
@@ -226,7 +263,8 @@ abstract contract ERC7540 is ERC4626 {
     function withdraw(uint256 assets, address to, address controller) public virtual override returns (uint256 shares) {
         if (assets > maxWithdraw(controller)) revert WithdrawMoreThanMax();
         _validateController(controller);
-        ERC7540_FilledRequest memory claimable = _claimableRedeemRequest[controller];
+        ERC7540Storage storage $ = _getERC7540Storage();
+        ERC7540_FilledRequest memory claimable = $.claimableRedeemRequest[controller];
         shares = claimable.convertToSharesUp(assets);
         (, shares) = _withdraw(assets, shares, to, controller);
     }
@@ -235,14 +273,16 @@ abstract contract ERC7540 is ERC4626 {
     /// @param controller Address to check pending redemption for
     /// @return Amount of shares pending redemption
     function pendingRedeemRequest(address controller) public view virtual returns (uint256) {
-        return _pendingRedeemRequest[controller].unwrap();
+        ERC7540Storage storage $ = _getERC7540Storage();
+        return $.pendingRedeemRequest[controller].unwrap();
     }
 
     /// @notice Returns the pending deposit request amount for a controller
     /// @param controller Address to check pending deposit for
     /// @return Amount of assets pending deposit
     function pendingDepositRequest(address controller) public view virtual returns (uint256) {
-        return _pendingDepositRequest[controller].unwrap();
+        ERC7540Storage storage $ = _getERC7540Storage();
+        return $.pendingDepositRequest[controller].unwrap();
     }
 
     /// @notice Returns the claimable deposit amount for a controller
@@ -269,10 +309,12 @@ abstract contract ERC7540 is ERC4626 {
         virtual
         returns (uint256 sharesReturn, uint256 assetsReturn)
     {
+        ERC7540Storage storage $ = _getERC7540Storage();
         unchecked {
-            _claimableDepositRequest[controller].assets -= assets;
-            _claimableDepositRequest[controller].shares -= shares;
+            $.claimableDepositRequest[controller].assets -= assets;
+            $.claimableDepositRequest[controller].shares -= shares;
         }
+        $.totalPendingDepositRequests -= assets;
         _mint(receiver, shares);
         /// @solidity memory-safe-assembly
         assembly {
@@ -301,9 +343,10 @@ abstract contract ERC7540 is ERC4626 {
         virtual
         returns (uint256 assetsReturn, uint256 sharesReturn)
     {
+        ERC7540Storage storage $ = _getERC7540Storage();
         unchecked {
-            _claimableRedeemRequest[controller].assets -= assets;
-            _claimableRedeemRequest[controller].shares -= shares;
+            $.claimableRedeemRequest[controller].assets -= assets;
+            $.claimableRedeemRequest[controller].shares -= shares;
         }
         asset().safeTransfer(receiver, assets);
         /// @solidity memory-safe-assembly
@@ -336,7 +379,9 @@ abstract contract ERC7540 is ERC4626 {
     {
         source;
         asset().safeTransferFrom(source, address(this), assets);
-        _pendingDepositRequest[controller] = _pendingDepositRequest[controller].add(assets);
+        ERC7540Storage storage $ = _getERC7540Storage();
+        $.totalPendingDepositRequests += assets;
+        $.pendingDepositRequest[controller] = $.pendingDepositRequest[controller].add(assets);
         emit DepositRequest(controller, owner, requestId, source, assets);
         return 0;
     }
@@ -353,7 +398,8 @@ abstract contract ERC7540 is ERC4626 {
     {
         source;
         _transfer(owner, address(this), shares);
-        _pendingRedeemRequest[controller] = _pendingRedeemRequest[controller].add(shares);
+        ERC7540Storage storage $ = _getERC7540Storage();
+        $.pendingRedeemRequest[controller] = $.pendingRedeemRequest[controller].add(shares);
         emit RedeemRequest(controller, owner, requestId, source, shares);
         return 0;
     }
@@ -365,14 +411,17 @@ abstract contract ERC7540 is ERC4626 {
     /// @return success Whether the call was executed successfully or not
     function setOperator(address operator, bool approved) public returns (bool success) {
         if (msg.sender == operator) revert InvalidOperator();
-        isOperator[msg.sender][operator] = approved;
+        ERC7540Storage storage $ = _getERC7540Storage();
+        $.isOperator[msg.sender][operator] = approved;
         emit OperatorSet(msg.sender, operator, approved);
         return true;
     }
 
     /// @dev Performs operator and controller permission checks
     function _validateController(address controller) private view {
-        if (msg.sender != controller && !isOperator[controller][msg.sender]) revert InvalidController();
+        if (msg.sender != controller && !_getERC7540Storage().isOperator[controller][msg.sender]) {
+            revert InvalidController();
+        }
     }
 
     /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
@@ -388,9 +437,10 @@ abstract contract ERC7540 is ERC4626 {
         internal
         virtual
     {
-        _pendingDepositRequest[controller] = _pendingDepositRequest[controller].sub(assetsFulfilled);
-        _claimableDepositRequest[controller].assets += assetsFulfilled;
-        _claimableDepositRequest[controller].shares += sharesMinted;
+        ERC7540Storage storage $ = _getERC7540Storage();
+        $.pendingDepositRequest[controller] = $.pendingDepositRequest[controller].sub(assetsFulfilled);
+        $.claimableDepositRequest[controller].assets += assetsFulfilled;
+        $.claimableDepositRequest[controller].shares += sharesMinted;
         emit FulfillDepositRequest(controller, assetsFulfilled, sharesMinted);
     }
 
@@ -405,13 +455,14 @@ abstract contract ERC7540 is ERC4626 {
         internal
         virtual
     {
+        ERC7540Storage storage $ = _getERC7540Storage();
         if (strict) {
-            _pendingRedeemRequest[controller] = _pendingRedeemRequest[controller].sub(sharesFulfilled);
+            $.pendingRedeemRequest[controller] = $.pendingRedeemRequest[controller].sub(sharesFulfilled);
         } else {
-            _pendingRedeemRequest[controller] = _pendingRedeemRequest[controller].sub0(sharesFulfilled);
+            $.pendingRedeemRequest[controller] = $.pendingRedeemRequest[controller].sub0(sharesFulfilled);
         }
-        _claimableRedeemRequest[controller].assets += assetsWithdrawn;
-        _claimableRedeemRequest[controller].shares += sharesFulfilled;
+        $.claimableRedeemRequest[controller].assets += assetsWithdrawn;
+        $.claimableRedeemRequest[controller].shares += sharesFulfilled;
         emit FulfillRedeemRequest(controller, sharesFulfilled, assetsWithdrawn);
     }
 }
