@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import { Hooks } from "./Hooks.sol";
-import { ERC7579Minimal, Execution, LibCall } from "erc7579-minimal/ERC7579Minimal.sol";
+import { ERC7579Minimal, Execution, IRegistry, LibCall } from "erc7579-minimal/ERC7579Minimal.sol";
 import { MultiFacetProxy } from "kam/base/MultiFacetProxy.sol";
 
 /// @title MetaWallet
@@ -54,11 +54,14 @@ contract MetaWallet is ERC7579Minimal, Hooks, MultiFacetProxy {
      * @return results Results from each execution
      */
     function _executeOperations(Execution[] memory executions) internal override returns (bytes[] memory results) {
+        MinimalAccountStorage storage $ = _getMinimalAccountStorage();
+        IRegistry _registry = $.registry;
+
         uint256 length = executions.length;
         results = new bytes[](length);
 
         for (uint256 i = 0; i < length; ++i) {
-            ++nonce;
+            ++$.nonce;
 
             bytes memory callData = executions[i].callData;
 
@@ -108,7 +111,7 @@ contract MetaWallet is ERC7579Minimal, Hooks, MultiFacetProxy {
             // Execute call
             results[i] = executions[i].target.callContract(executions[i].value, callData);
 
-            emit Executed(nonce, msg.sender, executions[i].target, callData, executions[i].value, results[i]);
+            emit Executed($.nonce, msg.sender, executions[i].target, callData, executions[i].value, results[i]);
         }
     }
 
