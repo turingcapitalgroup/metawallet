@@ -9,34 +9,50 @@ import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 import { IModule } from "kam/interfaces/modules/IModule.sol";
 
 // 4. Local Contracts (or base/lib contracts like ERC7540)
-import { ERC7540 } from "../lib/ERC7540.sol";
+import { ERC7540, SafeTransferLib } from "../lib/ERC7540.sol";
 
 /// @title VaultModule
 /// @notice An abstract module for managing vault assets and settlement proposals.
 /// All state is stored in a single, unique storage slot to prevent collisions.
-abstract contract VaultModule is ERC7540, OwnableRoles {
-    // --- Custom Errors ---
+abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
+    using SafeTransferLib for address;
 
-    // Note: In a real KAM project, these would be imported from a central Errors.sol file
-    string constant NO_ACTIVE_PROPOSAL = "V1";
-    string constant COOLDOWN_NOT_ELAPSED = "V2";
-    string constant MISMATCHED_ARRAYS = "V3";
+    /* //////////////////////////////////////////////////////////////
+                          ERRORS
+    //////////////////////////////////////////////////////////////*/
 
-    // --- State & Roles ---
+    string constant NO_ACTIVE_PROPOSAL = "MW1";
+    string constant COOLDOWN_NOT_ELAPSED = "MW2";
+    string constant MISMATCHED_ARRAYS = "MW3";
+
+
+    /* //////////////////////////////////////////////////////////////
+                            EVENTS
+    //////////////////////////////////////////////////////////////*/
+
+    event SettlementProposed(uint256 indexed newTotalAssets, bytes32 indexed newMerkleRoot, uint256 executeAfter);
+
+    event ProposalCancelled(uint256 totalAssets, bytes32 merkleRoot);
+
+    event SettlementExecuted(uint256 indexed totalAssets, bytes32 indexed merkleRoot);
+
+    /* //////////////////////////////////////////////////////////////
+                          STATE & ROLES
+    //////////////////////////////////////////////////////////////*/
 
     uint256 public constant MANAGER_ROLE = _ROLE_4;
     uint256 public constant GUARDIAN_ROLE = _ROLE_5;
 
     // Struct that represents a proposed settlement
     struct SettlementProposal {
-        uint256 totalAssets;
+        uint256 totalExternalAssets;
         bytes32 merkleRoot;
         uint256 executeAfter;
     }
 
     // Struct that holds all state for this module, stored at a single unique slot
     struct VaultModuleStorage {
-        uint256 totalAssets;
+        uint256 totalExternalAssets;
         bytes32 merkleRoot;
         uint256 cooldownPeriod;
         SettlementProposal currentProposal;
@@ -54,21 +70,24 @@ abstract contract VaultModule is ERC7540, OwnableRoles {
         }
     }
 
-    // --- Events ---
-
-    event SettlementProposed(uint256 indexed newTotalAssets, bytes32 indexed newMerkleRoot, uint256 executeAfter);
-
-    event ProposalCancelled(uint256 totalAssets, bytes32 merkleRoot);
-
-    event SettlementExecuted(uint256 indexed totalAssets, bytes32 indexed merkleRoot);
-
-    // --- Public Getters (Implementing ERC7540) ---
+    /* //////////////////////////////////////////////////////////////
+                         PUBLIC GETTERS
+    //////////////////////////////////////////////////////////////*/
 
     /// @notice Returns the current total assets recorded for the vault.
     /// @return _assets The total assets, excluding pending deposit requests.
     function totalAssets() public view override returns (uint256 _assets) {
+        return totalIdle() +  totalExternalAssets() - totalPendingDepositRequests();
+    }
+
+    /// @notice Returns the current total assets recorded for the vault.
+    function totalIdle() public view returns(uint256){
+        return asset().balanceOf(address(this));
+    }
+
+    function totalExternalAssets() public view returns(uint256) {
         VaultModuleStorage storage $ = _getVaultModuleStorage();
-        return $.totalAssets - totalPendingDepositRequests();
+        return $.totalExternalAssets; 
     }
 
     /// @notice Returns the current Merkle Root of strategy assets.
@@ -89,20 +108,23 @@ abstract contract VaultModule is ERC7540, OwnableRoles {
         return _getVaultModuleStorage().cooldownPeriod;
     }
 
-    // --- Core Proposal Logic ---
+    /* //////////////////////////////////////////////////////////////
+                        CORE PROPOSAL LOGIC
+    //////////////////////////////////////////////////////////////*/
+
 
     /// @notice Proposes a new settlement state (total assets and Merkle root).
-    /// @param _totalAssets The new total asset amount to be set.
-    /// @param _merkleRoot The Merkle root of the new strategy holdings.
+    /// @param _totalExternalAssets The new external total asset amount to be set.
+    /// @param _merkleRoot The Merkle root of the new strategy hol3dings.
     function proposeSettleTotalAssets(
-        uint256 _totalAssets,
+        uint256 _totalExternalAssets,
         bytes32 _merkleRoot
     ) external onlyRoles(MANAGER_ROLE) {
         VaultModuleStorage storage $ = _getVaultModuleStorage();
 
         // Create the new proposal
         SettlementProposal memory _newProposal = SettlementProposal({
-            totalAssets: _totalAssets,
+            totalExternalAssets: _totalExternalAssets,
             merkleRoot: _merkleRoot,
             executeAfter: block.timestamp + $.cooldownPeriod
         });
@@ -110,7 +132,7 @@ abstract contract VaultModule is ERC7540, OwnableRoles {
         $.currentProposal = _newProposal;
 
         // Emit event
-        emit SettlementProposed(_newProposal.totalAssets, _newProposal.merkleRoot, _newProposal.executeAfter);
+        emit SettlementProposed(_newProposal.totalExternalAssets, _newProposal.merkleRoot, _newProposal.executeAfter);
     }
 
     /// @notice Allows a GUARDIAN to cancel the current settlement proposal.
@@ -122,7 +144,7 @@ abstract contract VaultModule is ERC7540, OwnableRoles {
         require(_proposalToCancel.executeAfter != 0, NO_ACTIVE_PROPOSAL);
 
         // Emit event before deleting the proposal data
-        emit ProposalCancelled(_proposalToCancel.totalAssets, _proposalToCancel.merkleRoot);
+        emit ProposalCancelled(_proposalToCancel.totalExternalAssets, _proposalToCancel.merkleRoot);
 
         // Clear the proposal
         delete $.currentProposal;
@@ -140,17 +162,19 @@ abstract contract VaultModule is ERC7540, OwnableRoles {
         require(block.timestamp >= _proposal.executeAfter, COOLDOWN_NOT_ELAPSED);
 
         // Update the contract's state
-        $.totalAssets = _proposal.totalAssets;
+        $.totalExternalAssets = _proposal.totalExternalAssets;
         $.merkleRoot = _proposal.merkleRoot;
 
         // Emit event
-        emit SettlementExecuted($.totalAssets, $.merkleRoot);
+        emit SettlementExecuted($.totalExternalAssets, $.merkleRoot);
 
         // Clear the proposal
         delete $.currentProposal;
     }
 
-    // --- Utility Functions ---
+    /* //////////////////////////////////////////////////////////////
+                        UTILITY FUNCTIONS 
+    //////////////////////////////////////////////////////////////*/
 
     /// @notice Validates a set of strategy holdings against a Merkle root.
     /// @param _strategies Array of strategy addresses.
@@ -179,10 +203,9 @@ abstract contract VaultModule is ERC7540, OwnableRoles {
         return _root == _merkleRoot;
     }
 
-    /// @notice Returns the function selectors exposed by this module.
-    /// @return _selectors Array of 4-byte function selectors.
+    /// @inheritdoc IModule      
     function selectors() external pure returns (bytes4[] memory _selectors) {
-        _selectors = new bytes4[](33);
+        _selectors = new bytes4[](35);
         _selectors[0] = this.DOMAIN_SEPARATOR.selector;
         _selectors[1] = this.allowance.selector;
         _selectors[2] = this.approve.selector;
@@ -216,6 +239,8 @@ abstract contract VaultModule is ERC7540, OwnableRoles {
         _selectors[30] = this.currentProposal.selector;
         _selectors[31] = this.requestDeposit.selector;
         _selectors[32] = this.requestRedeem.selector;
+        _selectors[33] = this.totalIdle.selector;
+        _selectors[34] = this.totalExternalAssets.selector;
         return _selectors;
     }
 }
