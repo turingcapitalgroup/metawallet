@@ -2,13 +2,13 @@
 pragma solidity ^0.8.20;
 
 import { Hooks } from "./Hooks.sol";
-import { ERC7579Minimal, Execution, IRegistry, LibCall } from "erc7579-minimal/ERC7579Minimal.sol";
 import { MultiFacetProxy } from "kam/base/MultiFacetProxy.sol";
+import { Execution, IRegistry, LibCall, MinimalSmartAccount } from "minimal-smart-account/MinimalSmartAccount.sol";
 
 /// @title MetaWallet
 /// @notice ERC7579 wallet with advanced multi-hook support
 /// @dev Hooks can chain together, with each hook's output feeding into the next
-contract MetaWallet is ERC7579Minimal, Hooks, MultiFacetProxy {
+contract MetaWallet is MinimalSmartAccount, Hooks, MultiFacetProxy {
     using LibCall for address;
 
     /* ///////////////////////////////////////////////////////////////
@@ -49,7 +49,7 @@ contract MetaWallet is ERC7579Minimal, Hooks, MultiFacetProxy {
 
     /**
      * @notice Execute the operations (implementation for Hooks abstract contract)
-     * @dev Uses the ERC7579Minimal execution logic with registry authorization
+     * @dev Uses the MinimalSmartAccount execution logic with registry authorization
      * @param executions Array of executions to perform
      * @return results Results from each execution
      */

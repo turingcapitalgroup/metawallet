@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Execution } from "erc7579-minimal/interfaces/IERC7579Minimal.sol";
+import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
 
 /**
  * @title IHook

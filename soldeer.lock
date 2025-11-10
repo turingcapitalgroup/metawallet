@@ -1,14 +1,14 @@
 [[dependencies]]
-name = "erc7579-minimal"
-version = "1.0"
-git = "https://github.com/turingcapitalgroup/erc7579-minimal.git"
-rev = "01f84bc00a95e3530401222642d862c3d27e97b7"
-
-[[dependencies]]
 name = "kam"
 version = "1.0"
 git = "https://github.com/turingcapitalgroup/kam.git"
 rev = "bc3b567962df48f8c70ec2c2eafc696b872453fc"
+
+[[dependencies]]
+name = "minimal-smart-account"
+version = "1.0"
+git = "https://github.com/turingcapitalgroup/minimal-smart-account.git"
+rev = "d2c304a9f64f445a4566f81efd792ac25a129371"
 
 [[dependencies]]
 name = "solady"
