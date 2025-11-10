@@ -25,7 +25,6 @@ abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
     string constant COOLDOWN_NOT_ELAPSED = "MW2";
     string constant MISMATCHED_ARRAYS = "MW3";
 
-
     /* //////////////////////////////////////////////////////////////
                             EVENTS
     //////////////////////////////////////////////////////////////*/
@@ -77,17 +76,17 @@ abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
     /// @notice Returns the current total assets recorded for the vault.
     /// @return _assets The total assets, excluding pending deposit requests.
     function totalAssets() public view override returns (uint256 _assets) {
-        return totalIdle() +  totalExternalAssets() - totalPendingDepositRequests();
+        return totalIdle() + totalExternalAssets() - totalPendingDepositRequests();
     }
 
     /// @notice Returns the current total assets recorded for the vault.
-    function totalIdle() public view returns(uint256){
+    function totalIdle() public view returns (uint256) {
         return asset().balanceOf(address(this));
     }
 
-    function totalExternalAssets() public view returns(uint256) {
+    function totalExternalAssets() public view returns (uint256) {
         VaultModuleStorage storage $ = _getVaultModuleStorage();
-        return $.totalExternalAssets; 
+        return $.totalExternalAssets;
     }
 
     /// @notice Returns the current Merkle Root of strategy assets.
@@ -112,14 +111,13 @@ abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
                         CORE PROPOSAL LOGIC
     //////////////////////////////////////////////////////////////*/
 
-
     /// @notice Proposes a new settlement state (total assets and Merkle root).
     /// @param _totalExternalAssets The new external total asset amount to be set.
     /// @param _merkleRoot The Merkle root of the new strategy hol3dings.
-    function proposeSettleTotalAssets(
-        uint256 _totalExternalAssets,
-        bytes32 _merkleRoot
-    ) external onlyRoles(MANAGER_ROLE) {
+    function proposeSettleTotalAssets(uint256 _totalExternalAssets, bytes32 _merkleRoot)
+        external
+        onlyRoles(MANAGER_ROLE)
+    {
         VaultModuleStorage storage $ = _getVaultModuleStorage();
 
         // Create the new proposal
@@ -173,7 +171,7 @@ abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
     }
 
     /* //////////////////////////////////////////////////////////////
-                        UTILITY FUNCTIONS 
+                        UTILITY FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Validates a set of strategy holdings against a Merkle root.
@@ -181,11 +179,7 @@ abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
     /// @param _values Array of strategy values (holdings).
     /// @param _merkleRoot The Merkle root to validate against.
     /// @return Whether the provided leaves correctly derive the given Merkle root.
-    function validateTotalAssets(
-        address[] calldata _strategies,
-        uint256[] calldata _values,
-        bytes32 _merkleRoot
-    )
+    function validateTotalAssets(address[] calldata _strategies, uint256[] calldata _values, bytes32 _merkleRoot)
         external
         pure
         returns (bool)
@@ -203,7 +197,7 @@ abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
         return _root == _merkleRoot;
     }
 
-    /// @inheritdoc IModule      
+    /// @inheritdoc IModule
     function selectors() external pure returns (bytes4[] memory _selectors) {
         _selectors = new bytes4[](35);
         _selectors[0] = this.DOMAIN_SEPARATOR.selector;
