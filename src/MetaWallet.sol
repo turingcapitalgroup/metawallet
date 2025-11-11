@@ -1,30 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Hooks } from "./Hooks.sol";
+import { HookExecution, IHookExecution } from "./HookExecution.sol";
 import { MultiFacetProxy } from "kam/base/MultiFacetProxy.sol";
 import { Execution, IRegistry, LibCall, MinimalSmartAccount } from "minimal-smart-account/MinimalSmartAccount.sol";
 
 /// @title MetaWallet
 /// @notice ERC7579 wallet with advanced multi-hook support
-/// @dev Hooks can chain together, with each hook's output feeding into the next
-contract MetaWallet is MinimalSmartAccount, Hooks, MultiFacetProxy {
+/// @dev HookExecution can chain together, with each hook's output feeding into the next
+contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     using LibCall for address;
 
     /* ///////////////////////////////////////////////////////////////
                          HOOK MANAGEMENT
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Install a hook with a unique identifier
-    /// @param hookId Unique identifier for the hook (e.g., keccak256("deposit.erc4626"))
-    /// @param hookAddress Address of the hook contract
+    /// @inheritdoc IHookExecution
     function installHook(bytes32 hookId, address hookAddress) external {
         _checkRoles(ADMIN_ROLE);
         _installHook(hookId, hookAddress);
     }
 
-    /// @notice Uninstall a hook
-    /// @param hookId Identifier of the hook to uninstall
+    /// @inheritdoc IHookExecution
     function uninstallHook(bytes32 hookId) external {
         _checkRoles(ADMIN_ROLE);
         _uninstallHook(hookId);
@@ -34,25 +31,20 @@ contract MetaWallet is MinimalSmartAccount, Hooks, MultiFacetProxy {
                         HOOK-BASED EXECUTION
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Execute a chain of hooks
-    /// @dev Each hook builds its own execution logic, and hooks can chain together
-    /// @param hookExecutions Array of hook executions to execute in sequence
-    /// @return Final execution results
-    function executeWithHooks(HookExecution[] calldata hookExecutions) external returns (bytes[] memory) {
+    /// @inheritdoc IHookExecution
+    function executeWithHookExecution(HookExecution[] calldata hookExecutions) external returns (bytes[] memory) {
         _authorizeExecute(msg.sender);
-        return _executeHooks(hookExecutions);
+        return _executeHookExecution(hookExecutions);
     }
 
     /* ///////////////////////////////////////////////////////////////
                      HOOKS IMPLEMENTATION
     ///////////////////////////////////////////////////////////////*/
 
-    /**
-     * @notice Execute the operations (implementation for Hooks abstract contract)
-     * @dev Uses the MinimalSmartAccount execution logic with registry authorization
-     * @param executions Array of executions to perform
-     * @return results Results from each execution
-     */
+    /// @notice Execute the operations (implementation for HookExecution abstract contract)
+    /// @dev Uses the MinimalSmartAccount execution logic with registry authorization
+    /// @param executions Array of executions to perform
+    /// @return results Results from each execution
     function _executeOperations(Execution[] memory executions) internal override returns (bytes[] memory results) {
         MinimalAccountStorage storage $ = _getMinimalAccountStorage();
         IRegistry _registry = $.registry;

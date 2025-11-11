@@ -2,27 +2,20 @@
 pragma solidity ^0.8.20;
 
 import { IHook } from "./interfaces/IHook.sol";
+import { IHookExecution } from "./interfaces/IHookExecution.sol";
 import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
 
-/// @title Hooks
+/// @title HookExecution
 /// @notice Abstract contract providing multi-hook execution capabilities
 /// @dev Uses namespaced storage pattern for upgradeability (ERC-7201)
-abstract contract Hooks {
+abstract contract HookExecution is IHookExecution {
     /* ///////////////////////////////////////////////////////////////
                               STRUCTURES
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Configuration for a hook execution
-    /// @param hookId Unique identifier for the hook
-    /// @param data Hook-specific configuration data
-    struct HookExecution {
-        bytes32 hookId;
-        bytes data;
-    }
-
     /// @notice Storage structure for hooks
-    /// @custom:storage-location erc7201:metawallet.storage.Hooks
-    struct HooksStorage {
+    /// @custom:storage-location erc7201:metawallet.storage.HookExecution
+    struct HookExecutionStorage {
         /// @notice Registry of installed hooks by identifier
         mapping(bytes32 => address) hooks;
         /// @notice Array of all installed hook identifiers for enumeration
@@ -33,28 +26,9 @@ abstract contract Hooks {
                               STORAGE
     ///////////////////////////////////////////////////////////////*/
 
-    // keccak256(abi.encode(uint256(keccak256("metawallet.storage.Hooks")) - 1)) & ~bytes32(uint256(0xff))
+    // keccak256(abi.encode(uint256(keccak256("metawallet.storage.HookExecution")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant HOOKS_STORAGE_LOCATION =
         0x84561f583180cd92b2d787d13f2354aaa07b9087fa805467f0e3f5d2c4229100;
-
-    /* ///////////////////////////////////////////////////////////////
-                                EVENTS
-    ///////////////////////////////////////////////////////////////*/
-
-    event HookInstalled(bytes32 indexed hookId, address indexed hook);
-    event HookUninstalled(bytes32 indexed hookId, address indexed hook);
-    event HookExecutionStarted(bytes32 indexed hookId, address indexed hook);
-    event HookExecutionCompleted(bytes32 indexed hookId, address indexed hook);
-
-    /* ///////////////////////////////////////////////////////////////
-                               ERRORS
-    ///////////////////////////////////////////////////////////////*/
-
-    error HookNotInstalled(bytes32 hookId);
-    error HookAlreadyInstalled(bytes32 hookId);
-    error InvalidHookAddress();
-    error HookExecutionFailed(bytes32 hookId, string reason);
-    error EmptyHookChain();
 
     /* ///////////////////////////////////////////////////////////////
                           STORAGE ACCESS
@@ -62,7 +36,7 @@ abstract contract Hooks {
 
     /// @notice Get the hooks storage struct
     /// @return $ The hooks storage struct
-    function _getHooksStorage() private pure returns (HooksStorage storage $) {
+    function _getHookExecutionStorage() private pure returns (HookExecutionStorage storage $) {
         assembly {
             $.slot := HOOKS_STORAGE_LOCATION
         }
@@ -78,7 +52,7 @@ abstract contract Hooks {
     function _installHook(bytes32 hookId, address hookAddress) internal {
         if (hookAddress == address(0)) revert InvalidHookAddress();
 
-        HooksStorage storage $ = _getHooksStorage();
+        HookExecutionStorage storage $ = _getHookExecutionStorage();
         if ($.hooks[hookId] != address(0)) revert HookAlreadyInstalled(hookId);
 
         $.hooks[hookId] = hookAddress;
@@ -90,7 +64,7 @@ abstract contract Hooks {
     /// @notice Uninstall a hook
     /// @param hookId Identifier of the hook to uninstall
     function _uninstallHook(bytes32 hookId) internal {
-        HooksStorage storage $ = _getHooksStorage();
+        HookExecutionStorage storage $ = _getHookExecutionStorage();
         address hookAddress = $.hooks[hookId];
         if (hookAddress == address(0)) revert HookNotInstalled(hookId);
 
@@ -113,14 +87,14 @@ abstract contract Hooks {
     /// @param hookId The hook identifier
     /// @return The hook address (address(0) if not installed)
     function _getHook(bytes32 hookId) internal view returns (address) {
-        HooksStorage storage $ = _getHooksStorage();
+        HookExecutionStorage storage $ = _getHookExecutionStorage();
         return $.hooks[hookId];
     }
 
     /// @notice Get all installed hook identifiers
     /// @return Array of hook identifiers
-    function _getInstalledHooks() internal view returns (bytes32[] memory) {
-        HooksStorage storage $ = _getHooksStorage();
+    function _getInstalledHookExecution() internal view returns (bytes32[] memory) {
+        HookExecutionStorage storage $ = _getHookExecutionStorage();
         return $.hookIds;
     }
 
@@ -132,7 +106,7 @@ abstract contract Hooks {
     /// @dev Each hook builds its own execution logic, and hooks can chain together
     /// @param hookExecutions Array of hook executions to execute in sequence
     /// @return results Final execution results
-    function _executeHooks(HookExecution[] calldata hookExecutions) internal returns (bytes[] memory results) {
+    function _executeHookExecution(HookExecution[] calldata hookExecutions) internal returns (bytes[] memory results) {
         if (hookExecutions.length == 0) revert EmptyHookChain();
 
         // Build the complete execution sequence by chaining all hooks
@@ -149,7 +123,7 @@ abstract contract Hooks {
         view
         returns (Execution[] memory allExecutions)
     {
-        HooksStorage storage $ = _getHooksStorage();
+        HookExecutionStorage storage $ = _getHookExecutionStorage();
 
         // First pass: count total executions needed
         uint256 totalExecutions = 0;
@@ -187,7 +161,7 @@ abstract contract Hooks {
         internal
         returns (bytes[] memory results)
     {
-        HooksStorage storage $ = _getHooksStorage();
+        HookExecutionStorage storage $ = _getHookExecutionStorage();
 
         // Set execution context for all hooks
         for (uint256 i = 0; i < hookExecutions.length; i++) {
@@ -217,16 +191,13 @@ abstract contract Hooks {
                           VIEW FUNCTIONS
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Get a hook address by identifier (external)
-    /// @param hookId The hook identifier
-    /// @return The hook address (address(0) if not installed)
+    /// @inheritdoc IHookExecution
     function getHook(bytes32 hookId) external view returns (address) {
         return _getHook(hookId);
     }
 
-    /// @notice Get all installed hook identifiers (external)
-    /// @return Array of hook identifiers
-    function getInstalledHooks() external view returns (bytes32[] memory) {
-        return _getInstalledHooks();
+    /// @inheritdoc IHookExecution
+    function getInstalledHookExecution() external view returns (bytes32[] memory) {
+        return _getInstalledHookExecution();
     }
 }
