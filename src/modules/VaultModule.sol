@@ -12,9 +12,9 @@ import { IModule } from "kam/interfaces/modules/IModule.sol";
 import { ERC7540, SafeTransferLib } from "../lib/ERC7540.sol";
 
 /// @title VaultModule
-/// @notice An abstract module for managing vault assets and settlement proposals.
+/// @notice A module for managing vault assets and settlement proposals.
 /// All state is stored in a single, unique storage slot to prevent collisions.
-abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
+contract VaultModule is ERC7540, OwnableRoles, IModule {
     using SafeTransferLib for address;
 
     /* //////////////////////////////////////////////////////////////
@@ -55,33 +55,139 @@ abstract contract VaultModule is ERC7540, OwnableRoles, IModule {
         bytes32 merkleRoot;
         uint256 cooldownPeriod;
         SettlementProposal currentProposal;
+        bool initialized;
+        address asset;
+        string name;
+        string symbol;
+        uint8 decimals;
     }
 
-    // Unique storage slot calculated for collision prevention
-    bytes32 private constant VAULT_MODULE_STORAGE_SLOT = keccak256("com.myvault.vaultmodule.storage");
+    // keccak256(abi.encode(uint256(keccak256("metawallet.storage.VaultModule")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant VAULT_MODULE_STORAGE_LOCATION = 0x511216ea87b3ec844059069c7b970c812573d49674957e6b4ccb340e8aff7200;
 
     /// @notice Returns a pointer to the module's storage struct at its unique slot.
     function _getVaultModuleStorage() internal pure returns (VaultModuleStorage storage $) {
-        bytes32 _slot = VAULT_MODULE_STORAGE_SLOT;
+        bytes32 _slot = VAULT_MODULE_STORAGE_LOCATION;
         // Use assembly to load the storage pointer from the fixed slot
         assembly {
             $.slot := _slot
         }
     }
 
+    /// @dev Initializes the vault logic
+    function initializeVault(address _asset, string memory _name, string memory _symbol) external {
+        VaultModuleStorage storage $ = _getVaultModuleStorage();
+        if($.initialized) revert();
+        $.asset = _asset;
+        $.name = _name;
+        $.symbol = _symbol;
+        // Try to get asset decimals, revert if unsuccessful
+        (bool success, uint8 result) = _tryGetAssetDecimals(_asset);
+        if(!success) revert();
+        $.decimals = result;
+    }
+
+    /* //////////////////////////////////////////////////////////////
+                         ERC7540 Logic
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Transfers assets from sender into the Vault and submits a Request for asynchronous deposit.
+    /// @param assets the amount of deposit assets to transfer from owner
+    /// @param controller the controller of the request who will be able to operate the request
+    /// @param owner the owner of the shares to be deposited
+    /// @return requestId
+    function requestDeposit(
+        uint256 assets,
+        address controller,
+        address owner
+    )
+        public
+        override
+        returns (uint256 requestId)
+    {
+        if (owner != msg.sender) revert InvalidOperator();
+        requestId = super.requestDeposit(assets, controller, owner);
+        // fulfill the request directly
+        _fulfillDepositRequest(controller, assets, convertToShares(assets));
+    }
+
+    /// @dev The redeem amount is limited by the claimable redeem requests of the user
+    function maxRedeem(address owner) public view override returns (uint256 shares) {
+        ERC7540Storage storage $ = _getERC7540Storage();
+        uint256 _totalIdleShares = convertToShares(totalIdle());
+        uint256 pendingShares = pendingRedeemRequest(owner);
+        return _totalIdleShares > pendingShares ? pendingShares : pendingShares - _totalIdleShares;
+    }
+
+    /// @notice Claims processed redemption request
+    /// @dev Can only be called by controller or approved operator
+    /// @param shares Amount of shares to redeem
+    /// @param to Address to receive the assets
+    /// @param controller Controller of the redemption request
+    /// @return assets Amount of assets returned
+    function redeem(uint256 shares, address to, address controller) public virtual override returns (uint256 assets) {
+        if (shares > maxRedeem(controller)) revert RedeemMoreThanMax();
+        uint256 assets = convertToAssets(shares);
+        _fulfillRedeemRequest(shares, assets, controller, true);
+        _validateController(controller);
+        ERC7540Storage storage $ = _getERC7540Storage();
+        (assets,) = _withdraw(assets, shares, to, controller);
+    }
+
+    /// @notice Claims processed redemption request for exact assets
+    /// @dev Can only be called by controller or approved operator
+    /// @param assets Exact amount of assets to withdraw
+    /// @param to Address to receive the assets
+    /// @param controller Controller of the redemption request
+    /// @return shares Amount of shares burned
+    function withdraw(uint256 assets, address to, address controller) public virtual override returns (uint256 shares) {
+        if (assets > maxWithdraw(controller)) revert WithdrawMoreThanMax();
+        uint256 shares = convertToAssets(assets);
+        _fulfillRedeemRequest(shares, assets, controller, true);
+        _validateController(controller);
+        ERC7540Storage storage $ = _getERC7540Storage();
+        (, shares) = _withdraw(assets, shares, to, controller);
+    }
+
+
     /* //////////////////////////////////////////////////////////////
                          PUBLIC GETTERS
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Returns the address of the underlying asset.
+    function asset() public view override returns(address) {
+        return _getVaultModuleStorage().asset;
+    }
+
+     /// @notice Returns the name of the token.
+    function name() public view override returns(string memory) {
+        return _getVaultModuleStorage().name;
+    }
+
+    /// @notice Returns the symbol of the token.
+    function symbol() public view override returns(string memory) {
+        return _getVaultModuleStorage().symbol;
+    }
+    
+    /// @notice Returns the decimals of the token.
+    function decimals() public view override returns(uint8) {
+        return _getVaultModuleStorage().decimals;
+    }
+
+    /// @notice Returns the estimate price of 1 vault share
+    function sharePrice() public view returns (uint256) {
+        return convertToAssets(10 ** decimals());
+    }
+
     /// @notice Returns the current total assets recorded for the vault.
     /// @return _assets The total assets, excluding pending deposit requests.
     function totalAssets() public view override returns (uint256 _assets) {
-        return totalIdle() + totalExternalAssets() - totalPendingDepositRequests();
+        return totalIdle() + totalExternalAssets();
     }
 
     /// @notice Returns the current total assets recorded for the vault.
     function totalIdle() public view returns (uint256) {
-        return asset().balanceOf(address(this));
+        return asset().balanceOf(address(this)) - totalPendingDepositRequests();
     }
 
     function totalExternalAssets() public view returns (uint256) {

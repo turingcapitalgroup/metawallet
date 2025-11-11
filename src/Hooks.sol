@@ -35,7 +35,7 @@ abstract contract Hooks {
 
     // keccak256(abi.encode(uint256(keccak256("metawallet.storage.Hooks")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant HOOKS_STORAGE_LOCATION =
-        0x8d3e3f6f5e5d7b8c9a2b4d1e3f5a6c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a00;
+        0x84561f583180cd92b2d787d13f2354aaa07b9087fa805467f0e3f5d2c4229100;
 
     /* ///////////////////////////////////////////////////////////////
                                 EVENTS

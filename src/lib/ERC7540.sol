@@ -79,7 +79,7 @@ abstract contract ERC7540 is ERC4626 {
     bytes32 private constant ERC7540_STORAGE_LOCATION =
         0x1f258c11921df783aee40e51a8bea706dacc811ab5bbdb895d3bfcffe1a3ff00;
 
-    function _getERC7540Storage() private pure returns (ERC7540Storage storage $) {
+    function _getERC7540Storage() internal pure returns (ERC7540Storage storage $) {
         assembly {
             $.slot := ERC7540_STORAGE_LOCATION
         }
@@ -390,7 +390,7 @@ abstract contract ERC7540 is ERC4626 {
     }
 
     /// @dev Performs operator and controller permission checks
-    function _validateController(address controller) private view {
+    function _validateController(address controller) internal view {
         if (msg.sender != controller && !_getERC7540Storage().isOperator[controller][msg.sender]) {
             revert InvalidController();
         }
