@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { IHook } from "./interfaces/IHook.sol";
-import { IHookExecution } from "./interfaces/IHookExecution.sol";
+import { IHook } from "metawallet/src/interfaces/IHook.sol";
+import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
 import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
 
 /// @title HookExecution

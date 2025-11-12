@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { IHook } from "./interfaces/IHook.sol";
-import { IERC4626 } from "./interfaces/IERC4626.sol";
-import { IERC20 } from "./interfaces/IERC20.sol";
+import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
+import { IERC4626 } from "metawallet/src/interfaces/IERC4626.sol";
+import { IHook } from "metawallet/src/interfaces/IHook.sol";
 import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
 
 /// @title ERC4626ApproveAndDepositHook
@@ -108,22 +108,14 @@ contract ERC4626ApproveAndDepositHook is IHook {
         executions[0] = Execution({
             target: asset,
             value: 0,
-            callData: abi.encodeWithSelector(
-                IERC20.approve.selector,
-                depositData.vault,
-                depositData.assets
-            )
+            callData: abi.encodeWithSelector(IERC20.approve.selector, depositData.vault, depositData.assets)
         });
 
         // Execution 1: Deposit assets into vault
         executions[1] = Execution({
             target: depositData.vault,
             value: 0,
-            callData: abi.encodeWithSelector(
-                IERC4626.deposit.selector,
-                depositData.assets,
-                depositData.receiver
-            )
+            callData: abi.encodeWithSelector(IERC4626.deposit.selector, depositData.assets, depositData.receiver)
         });
 
         // Execution 2: Store context for next hook
@@ -146,10 +138,7 @@ contract ERC4626ApproveAndDepositHook is IHook {
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
-                    this.validateMinShares.selector,
-                    depositData.vault,
-                    depositData.receiver,
-                    depositData.minShares
+                    this.validateMinShares.selector, depositData.vault, depositData.receiver, depositData.minShares
                 )
             });
         }
@@ -165,7 +154,7 @@ contract ERC4626ApproveAndDepositHook is IHook {
     function finalizeHookContext(address caller) external override {
         if (!_executionContext[caller]) revert HookNotInitialized();
         _executionContext[caller] = false;
-        
+
         // Clean up context data after execution completes
         delete _depositContext[caller];
     }
@@ -197,10 +186,12 @@ contract ERC4626ApproveAndDepositHook is IHook {
         address asset,
         uint256 assetsDeposited,
         address receiver
-    ) external {
+    )
+        external
+    {
         // Get actual shares received
         uint256 sharesReceived = IERC20(vault).balanceOf(receiver);
-        
+
         // Store context
         _depositContext[caller] = DepositContext({
             vault: vault,

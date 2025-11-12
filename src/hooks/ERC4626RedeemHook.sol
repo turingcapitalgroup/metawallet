@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { IHook } from "./interfaces/IHook.sol";
-import { IERC4626 } from "./interfaces/IERC4626.sol";
-import { IERC20 } from "./interfaces/IERC20.sol";
+import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
+import { IERC4626 } from "metawallet/src/interfaces/IERC4626.sol";
+import { IHook } from "metawallet/src/interfaces/IHook.sol";
 import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
 
 /// @title ERC4626RedeemHook
@@ -112,10 +112,7 @@ contract ERC4626RedeemHook is IHook {
             target: redeemData.vault,
             value: 0,
             callData: abi.encodeWithSelector(
-                IERC4626.redeem.selector,
-                redeemData.shares,
-                redeemData.receiver,
-                redeemData.owner
+                IERC4626.redeem.selector, redeemData.shares, redeemData.receiver, redeemData.owner
             )
         });
 
@@ -140,10 +137,7 @@ contract ERC4626RedeemHook is IHook {
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
-                    this.validateMinAssets.selector,
-                    asset,
-                    redeemData.receiver,
-                    redeemData.minAssets
+                    this.validateMinAssets.selector, asset, redeemData.receiver, redeemData.minAssets
                 )
             });
         }
@@ -159,7 +153,7 @@ contract ERC4626RedeemHook is IHook {
     function finalizeHookContext(address caller) external override {
         if (!_executionContext[caller]) revert HookNotInitialized();
         _executionContext[caller] = false;
-        
+
         // Clean up context data after execution completes
         delete _redeemContext[caller];
     }
@@ -193,10 +187,12 @@ contract ERC4626RedeemHook is IHook {
         uint256 sharesRedeemed,
         address receiver,
         address owner
-    ) external {
+    )
+        external
+    {
         // Get actual assets received
         uint256 assetsReceived = IERC20(asset).balanceOf(receiver);
-        
+
         // Store context
         _redeemContext[caller] = RedeemContext({
             vault: vault,

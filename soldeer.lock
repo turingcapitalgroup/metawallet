@@ -1,4 +1,11 @@
 [[dependencies]]
+name = "forge-std"
+version = "1.11.0"
+url = "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_11_0_09-10-2025_06:23:22_forge-std-1.11.zip"
+checksum = "0290ef84c693dc9086f98f6a9b4a69dc5c2b6aa1cfe10a989bd1def1a456c099"
+integrity = "84aa7d32f8c7329468cf16f31f0f74e68072e634fdbde98f3bb00c6b136103b2"
+
+[[dependencies]]
 name = "kam"
 version = "1.0"
 git = "https://github.com/turingcapitalgroup/kam.git"
@@ -8,7 +15,7 @@ rev = "bc3b567962df48f8c70ec2c2eafc696b872453fc"
 name = "minimal-smart-account"
 version = "1.0"
 git = "https://github.com/turingcapitalgroup/minimal-smart-account.git"
-rev = "d2c304a9f64f445a4566f81efd792ac25a129371"
+rev = "84037a414f8c8ba013d64079671030623af234c2"
 
 [[dependencies]]
 name = "solady"

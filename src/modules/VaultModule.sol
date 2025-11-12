@@ -6,8 +6,8 @@ import { OwnableRoles } from "solady/auth/OwnableRoles.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 
 // 3. Local Interfaces
-import { IVaultModule } from "../interfaces/IVaultModule.sol";
 import { IModule } from "kam/interfaces/modules/IModule.sol";
+import { IVaultModule } from "metawallet/src/interfaces/IVaultModule.sol";
 
 // 4. Local Contracts (or base/lib contracts like ERC7540)
 import { ERC7540, SafeTransferLib } from "../lib/ERC7540.sol";
@@ -29,7 +29,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /* //////////////////////////////////////////////////////////////
                           STATE & ROLES
     //////////////////////////////////////////////////////////////*/
-
+    uint256 public constant ADMIN_ROLE = _ROLE_0;
     uint256 public constant MANAGER_ROLE = _ROLE_4;
     uint256 public constant GUARDIAN_ROLE = _ROLE_5;
 
@@ -60,15 +60,18 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     }
 
     /// @inheritdoc IVaultModule
-    function initializeVault(address _asset, string memory _name, string memory _symbol) external {
+    function initializeVault(address _asset, string memory _name, string memory _symbol)
+        external
+        onlyRoles(ADMIN_ROLE)
+    {
         VaultModuleStorage storage $ = _getVaultModuleStorage();
-        if ($.initialized) revert();
+        if ($.initialized) revert("helllo");
         $.asset = _asset;
         $.name = _name;
         $.symbol = _symbol;
         // Try to get asset decimals, revert if unsuccessful
         (bool success, uint8 result) = _tryGetAssetDecimals(_asset);
-        if (!success) revert();
+        if (!success) revert("hi");
         $.decimals = result;
     }
 
@@ -274,7 +277,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @inheritdoc IModule
     function selectors() external pure returns (bytes4[] memory _selectors) {
-        _selectors = new bytes4[](35);
+        _selectors = new bytes4[](40);
         _selectors[0] = this.DOMAIN_SEPARATOR.selector;
         _selectors[1] = this.allowance.selector;
         _selectors[2] = this.approve.selector;
@@ -283,12 +286,12 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _selectors[5] = this.convertToAssets.selector;
         _selectors[6] = this.convertToShares.selector;
         _selectors[7] = this.decimals.selector;
-        // _selectors[8] = this.deposit.selector;
+        _selectors[8] = bytes4(abi.encodeWithSignature("deposit(uint256,address)"));
         _selectors[9] = this.maxDeposit.selector;
         _selectors[10] = this.maxMint.selector;
         _selectors[11] = this.maxRedeem.selector;
         _selectors[12] = this.maxWithdraw.selector;
-        //  _selectors[13] = this.mint.selector;
+        _selectors[13] = bytes4(abi.encodeWithSignature("mint(uint256,address)"));
         _selectors[14] = this.name.selector;
         _selectors[15] = this.nonces.selector;
         _selectors[16] = this.permit.selector;
@@ -310,6 +313,11 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _selectors[32] = this.requestRedeem.selector;
         _selectors[33] = this.totalIdle.selector;
         _selectors[34] = this.totalExternalAssets.selector;
+        _selectors[35] = this.initializeVault.selector;
+        _selectors[36] = this.claimableDepositRequest.selector;
+        _selectors[37] = this.claimableRedeemRequest.selector;
+        _selectors[38] = this.pendingDepositRequest.selector;
+        _selectors[39] = this.pendingRedeemRequest.selector;
         return _selectors;
     }
 }
