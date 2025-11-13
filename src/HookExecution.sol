@@ -3,15 +3,26 @@ pragma solidity ^0.8.20;
 
 // External Libraries
 import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 // Local Interfaces
 import { IHook } from "metawallet/src/interfaces/IHook.sol";
 import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
 
+// Local Errors
+import {
+    HOOKEXECUTION_EMPTY_HOOK_CHAIN,
+    HOOKEXECUTION_HOOK_ALREADY_INSTALLED,
+    HOOKEXECUTION_HOOK_NOT_INSTALLED,
+    HOOKEXECUTION_INVALID_HOOK_ADDRESS
+} from "metawallet/src/errors/Errors.sol";
+
 /// @title HookExecution
 /// @notice Abstract contract providing multi-hook execution capabilities
 /// @dev Uses namespaced storage pattern for upgradeability (ERC-7201)
 abstract contract HookExecution is IHookExecution {
+    using EnumerableSetLib for EnumerableSetLib.Bytes32Set;
+
     /* ///////////////////////////////////////////////////////////////
                               STRUCTURES
     ///////////////////////////////////////////////////////////////*/
@@ -22,7 +33,7 @@ abstract contract HookExecution is IHookExecution {
         /// @notice Registry of installed hooks by identifier
         mapping(bytes32 => address) hooks;
         /// @notice Array of all installed hook identifiers for enumeration
-        bytes32[] hookIds;
+        EnumerableSetLib.Bytes32Set hookIds;
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -53,13 +64,13 @@ abstract contract HookExecution is IHookExecution {
     /// @param _hookId Unique identifier for the hook (e.g., keccak256("deposit.erc4626"))
     /// @param _hookAddress Address of the hook contract
     function _installHook(bytes32 _hookId, address _hookAddress) internal {
-        if (_hookAddress == address(0)) revert InvalidHookAddress();
+        require(_hookAddress != address(0), HOOKEXECUTION_INVALID_HOOK_ADDRESS);
 
         HookExecutionStorage storage $ = _getHookExecutionStorage();
-        if ($.hooks[_hookId] != address(0)) revert HookAlreadyInstalled(_hookId);
+        require($.hooks[_hookId] == address(0), HOOKEXECUTION_HOOK_ALREADY_INSTALLED);
 
         $.hooks[_hookId] = _hookAddress;
-        $.hookIds.push(_hookId);
+        $.hookIds.add(_hookId);
 
         emit HookInstalled(_hookId, _hookAddress);
     }
@@ -69,19 +80,12 @@ abstract contract HookExecution is IHookExecution {
     function _uninstallHook(bytes32 _hookId) internal {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
         address _hookAddress = $.hooks[_hookId];
-        if (_hookAddress == address(0)) revert HookNotInstalled(_hookId);
+        require(_hookAddress != address(0), HOOKEXECUTION_HOOK_NOT_INSTALLED);
 
         delete $.hooks[_hookId];
 
         // Remove from array
-        bytes32[] storage _hookIds = $.hookIds;
-        for (uint256 _i = 0; _i < _hookIds.length; _i++) {
-            if (_hookIds[_i] == _hookId) {
-                _hookIds[_i] = _hookIds[_hookIds.length - 1];
-                _hookIds.pop();
-                break;
-            }
-        }
+        $.hookIds.remove(_hookId);
 
         emit HookUninstalled(_hookId, _hookAddress);
     }
@@ -96,9 +100,9 @@ abstract contract HookExecution is IHookExecution {
 
     /// @notice Get all installed hook identifiers
     /// @return _hookIds Array of hook identifiers
-    function _getInstalledHookExecution() internal view returns (bytes32[] memory _hookIds) {
+    function _getInstalledHooks() internal view returns (bytes32[] memory _hookIds) {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
-        return $.hookIds;
+        return $.hookIds.values();
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -113,7 +117,7 @@ abstract contract HookExecution is IHookExecution {
         internal
         returns (bytes[] memory _results)
     {
-        if (_hookExecutions.length == 0) revert EmptyHookChain();
+        require(_hookExecutions.length > 0, HOOKEXECUTION_EMPTY_HOOK_CHAIN);
 
         // Build the complete execution sequence by chaining all hooks
         Execution[] memory _allExecutions = _buildExecutionChain(_hookExecutions);
@@ -137,7 +141,7 @@ abstract contract HookExecution is IHookExecution {
         uint256 _totalExecutions = 0;
         for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
             address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
-            if (_hookAddress == address(0)) revert HookNotInstalled(_hookExecutions[_i].hookId);
+            require(_hookAddress != address(0), HOOKEXECUTION_HOOK_NOT_INSTALLED);
 
             address _previousHook = _i > 0 ? $.hooks[_hookExecutions[_i - 1].hookId] : address(0);
             Execution[] memory _hookExecs =
@@ -211,7 +215,7 @@ abstract contract HookExecution is IHookExecution {
 
     /// @inheritdoc IHookExecution
     /// @return _hookIds Array of all installed hook identifiers
-    function getInstalledHookExecution() external view returns (bytes32[] memory _hookIds) {
-        return _getInstalledHookExecution();
+    function getInstalledHooks() external view returns (bytes32[] memory _hookIds) {
+        return _getInstalledHooks();
     }
 }

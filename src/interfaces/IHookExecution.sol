@@ -51,5 +51,5 @@ interface IHookExecution {
 
     /// @notice Get all installed hook identifiers (external)
     /// @return Array of hook identifiers
-    function getInstalledHookExecution() external view returns (bytes32[] memory);
+    function getInstalledHooks() external view returns (bytes32[] memory);
 }
