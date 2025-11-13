@@ -65,13 +65,11 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @notice Tracks execution context per caller
-    /// @dev Maps caller address to execution state
-    mapping(address => bool) private _executionContext;
+    bool private _executionContext;
 
     /// @notice Stores redeem context data for each caller
-    /// @dev Maps caller address to their latest redeem context
     /// @dev This allows subsequent hooks to access redemption details
-    mapping(address => RedeemContext) private _redeemContext;
+    RedeemContext private _redeemContext;
 
     /* ///////////////////////////////////////////////////////////////
                          HOOK DATA STRUCTURE
@@ -101,10 +99,9 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
 
     /// @inheritdoc IHook
     /// @param _previousHook The address of the previous hook in the chain
-    /// @param _smartAccount The address of the smart account executing the hook
     /// @param _data Encoded RedeemData
     /// @return _executions Array of executions to perform
-    function buildExecutions(address _previousHook, address _smartAccount, bytes calldata _data)
+    function buildExecutions(address _previousHook, bytes calldata _data)
         external
         view
         override
@@ -139,12 +136,7 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
-                    this.resolveDynamicAmount.selector,
-                    _previousHook,
-                    _smartAccount,
-                    _redeemData.vault,
-                    _asset,
-                    _redeemData.owner
+                    this.resolveDynamicAmount.selector, _previousHook, _redeemData.vault, _asset, _redeemData.owner
                 )
             });
 
@@ -159,14 +151,14 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
             _executions[2] = Execution({
                 target: address(this),
                 value: 0,
-                callData: abi.encodeWithSelector(this.executeRedeem.selector, _smartAccount, _redeemData.receiver)
+                callData: abi.encodeWithSelector(this.executeRedeem.selector, _redeemData.receiver)
             });
 
             // Execution 3: Store context for next hook
             _executions[3] = Execution({
                 target: address(this),
                 value: 0,
-                callData: abi.encodeWithSelector(this.storeRedeemContext.selector, _smartAccount, _redeemData.receiver)
+                callData: abi.encodeWithSelector(this.storeRedeemContext.selector, _redeemData.receiver)
             });
 
             // Execution 4 (optional): Validate minimum assets received
@@ -202,7 +194,6 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
                 value: 0,
                 callData: abi.encodeWithSelector(
                     this.storeRedeemContextStatic.selector,
-                    _smartAccount,
                     _redeemData.vault,
                     _asset,
                     _redeemData.shares,
@@ -225,18 +216,16 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     }
 
     /// @inheritdoc IHook
-    /// @param _caller The address initiating the hook execution
-    function initializeHookContext(address _caller) external override onlyOwner {
-        _executionContext[_caller] = true;
+    function initializeHookContext() external override onlyOwner {
+        _executionContext = true;
     }
 
     /// @inheritdoc IHook
-    /// @param _caller The address whose hook execution is finalizing
-    function finalizeHookContext(address _caller) external override onlyOwner {
-        _executionContext[_caller] = false;
+    function finalizeHookContext() external override onlyOwner {
+        _executionContext = false;
 
         // Clean up context data after execution completes
-        delete _redeemContext[_caller];
+        delete _redeemContext;
     }
 
     /// @inheritdoc IHook
@@ -256,10 +245,9 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookResult
-    /// @param _caller The account that executed the hook
     /// @return _outputAmount The amount of assets received from the redemption
-    function getOutputAmount(address _caller) external view override returns (uint256 _outputAmount) {
-        return _redeemContext[_caller].assetsReceived;
+    function getOutputAmount() external view override returns (uint256 _outputAmount) {
+        return _redeemContext.assetsReceived;
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -269,25 +257,16 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     /// @notice Resolve the dynamic amount from the previous hook
     /// @dev Called during execution to get amount from previous hook's output
     /// @param _previousHook The address of the previous hook
-    /// @param _caller The address executing the hook chain
     /// @param _vault The vault address (stored for later use)
     /// @param _asset The asset address (stored for later use)
     /// @param _owner The owner of the shares (stored for later use)
-    function resolveDynamicAmount(
-        address _previousHook,
-        address _caller,
-        address _vault,
-        address _asset,
-        address _owner
-    )
-        external
-    {
+    function resolveDynamicAmount(address _previousHook, address _vault, address _asset, address _owner) external {
         // Get amount from previous hook
-        uint256 _amount = IHookResult(_previousHook).getOutputAmount(_caller);
+        uint256 _amount = IHookResult(_previousHook).getOutputAmount();
         require(_amount > 0, HOOK4626REDEEM_INVALID_HOOK_DATA);
 
         // Store temporary context with the resolved amount
-        _redeemContext[_caller] = RedeemContext({
+        _redeemContext = RedeemContext({
             vault: _vault,
             asset: _asset,
             sharesRedeemed: _amount,
@@ -299,10 +278,9 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     }
 
     /// @notice Execute the redemption (for dynamic amount flow)
-    /// @param _caller The address executing the hook chain
     /// @param _receiver The address to receive the assets
-    function executeRedeem(address _caller, address _receiver) external onlyOwner {
-        RedeemContext storage _ctx = _redeemContext[_caller];
+    function executeRedeem(address _receiver) external onlyOwner {
+        RedeemContext storage _ctx = _redeemContext;
         IERC4626(_ctx.vault).redeem(_ctx.sharesRedeemed, _receiver, _ctx.owner);
         _ctx.receiver = _receiver;
     }
@@ -313,10 +291,9 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
 
     /// @notice Store redeem context after execution (for dynamic amount flow)
     /// @dev Called as part of the execution chain to save final context
-    /// @param _caller The address executing the hook chain
     /// @param _receiver The address that received assets
-    function storeRedeemContext(address _caller, address _receiver) external onlyOwner {
-        RedeemContext storage _ctx = _redeemContext[_caller];
+    function storeRedeemContext(address _receiver) external onlyOwner {
+        RedeemContext storage _ctx = _redeemContext;
 
         // Get actual assets received
         uint256 _assetsReceived = IERC20(_ctx.asset).balanceOf(_receiver);
@@ -327,14 +304,12 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
 
     /// @notice Store redeem context after execution (for static amount flow)
     /// @dev Called as part of the execution chain to save context for next hook
-    /// @param _caller The address executing the hook chain
     /// @param _vault The vault address
     /// @param _asset The underlying asset address
     /// @param _sharesRedeemed The amount of shares redeemed
     /// @param _receiver The address that received assets
     /// @param _owner The owner of the redeemed shares
     function storeRedeemContextStatic(
-        address _caller,
         address _vault,
         address _asset,
         uint256 _sharesRedeemed,
@@ -348,7 +323,7 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
         uint256 _assetsReceived = IERC20(_asset).balanceOf(_receiver);
 
         // Store context
-        _redeemContext[_caller] = RedeemContext({
+        _redeemContext = RedeemContext({
             vault: _vault,
             asset: _asset,
             sharesRedeemed: _sharesRedeemed,
@@ -378,47 +353,41 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @notice Check if a caller has an active execution context
-    /// @param _caller The address to check
     /// @return _hasContext Whether the caller has an active execution context
-    function hasActiveContext(address _caller) external view returns (bool _hasContext) {
-        return _executionContext[_caller];
+    function hasActiveContext() external view returns (bool _hasContext) {
+        return _executionContext;
     }
 
     /// @notice Get the stored redeem context for a caller
     /// @dev Returns the context from the last redeem operation
     /// @dev This allows subsequent hooks to access redemption information
-    /// @param _caller The address to get context for
     /// @return _context The stored redeem context
-    function getRedeemContext(address _caller) external view returns (RedeemContext memory _context) {
-        return _redeemContext[_caller];
+    function getRedeemContext() external view returns (RedeemContext memory _context) {
+        return _redeemContext;
     }
 
     /// @notice Get the vault address from the last redemption
-    /// @param _caller The address to check
     /// @return _vault The vault address
-    function getLastVault(address _caller) external view returns (address _vault) {
-        return _redeemContext[_caller].vault;
+    function getLastVault() external view returns (address _vault) {
+        return _redeemContext.vault;
     }
 
     /// @notice Get the assets received from the last redemption
-    /// @param _caller The address to check
     /// @return _assets The amount of assets received
-    function getLastAssetsReceived(address _caller) external view returns (uint256 _assets) {
-        return _redeemContext[_caller].assetsReceived;
+    function getLastAssetsReceived() external view returns (uint256 _assets) {
+        return _redeemContext.assetsReceived;
     }
 
     /// @notice Get the shares redeemed in the last operation
-    /// @param _caller The address to check
     /// @return _shares The amount of shares redeemed
-    function getLastSharesRedeemed(address _caller) external view returns (uint256 _shares) {
-        return _redeemContext[_caller].sharesRedeemed;
+    function getLastSharesRedeemed() external view returns (uint256 _shares) {
+        return _redeemContext.sharesRedeemed;
     }
 
     /// @notice Get the underlying asset from the last redemption
-    /// @param _caller The address to check
     /// @return _asset The underlying asset address
-    function getLastAsset(address _caller) external view returns (address _asset) {
-        return _redeemContext[_caller].asset;
+    function getLastAsset() external view returns (address _asset) {
+        return _redeemContext.asset;
     }
 
     /// @notice Preview the assets that would be received for a redemption

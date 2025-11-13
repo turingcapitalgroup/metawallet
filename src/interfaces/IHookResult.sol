@@ -8,8 +8,7 @@ pragma solidity ^0.8.20;
 interface IHookResult {
     /**
      * @notice Get the output amount from this hook's execution
-     * @param caller The account that executed the hook
      * @return The output amount
      */
-    function getOutputAmount(address caller) external view returns (uint256);
+    function getOutputAmount() external view returns (uint256);
 }

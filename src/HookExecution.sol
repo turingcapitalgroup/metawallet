@@ -144,8 +144,7 @@ abstract contract HookExecution is IHookExecution {
             require(_hookAddress != address(0), HOOKEXECUTION_HOOK_NOT_INSTALLED);
 
             address _previousHook = _i > 0 ? $.hooks[_hookExecutions[_i - 1].hookId] : address(0);
-            Execution[] memory _hookExecs =
-                IHook(_hookAddress).buildExecutions(_previousHook, address(this), _hookExecutions[_i].data);
+            Execution[] memory _hookExecs = IHook(_hookAddress).buildExecutions(_previousHook, _hookExecutions[_i].data);
             _totalExecutions += _hookExecs.length;
         }
 
@@ -157,8 +156,7 @@ abstract contract HookExecution is IHookExecution {
             address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
             address _previousHook = _i > 0 ? $.hooks[_hookExecutions[_i - 1].hookId] : address(0);
 
-            Execution[] memory _hookExecs =
-                IHook(_hookAddress).buildExecutions(_previousHook, address(this), _hookExecutions[_i].data);
+            Execution[] memory _hookExecs = IHook(_hookAddress).buildExecutions(_previousHook, _hookExecutions[_i].data);
 
             // Copy hook executions into the main array
             for (uint256 _j = 0; _j < _hookExecs.length; _j++) {
@@ -181,7 +179,7 @@ abstract contract HookExecution is IHookExecution {
         // Set execution context for all hooks
         for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
             address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
-            IHook(_hookAddress).initializeHookContext(address(this));
+            IHook(_hookAddress).initializeHookContext();
             emit HookExecutionStarted(_hookExecutions[_i].hookId, _hookAddress);
         }
 
@@ -191,7 +189,7 @@ abstract contract HookExecution is IHookExecution {
         // Reset execution state for all hooks
         for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
             address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
-            IHook(_hookAddress).finalizeHookContext(address(this));
+            IHook(_hookAddress).finalizeHookContext();
             emit HookExecutionCompleted(_hookExecutions[_i].hookId, _hookAddress);
         }
     }

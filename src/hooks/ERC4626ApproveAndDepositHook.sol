@@ -67,12 +67,12 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
 
     /// @notice Tracks execution context per caller
     /// @dev Maps caller address to execution state
-    mapping(address => bool) private _executionContext;
+    bool private _executionContext;
 
     /// @notice Stores deposit context data for each caller
     /// @dev Maps caller address to their latest deposit context
     /// @dev This allows subsequent hooks to access deposit details
-    mapping(address => DepositContext) private _depositContext;
+    DepositContext private _depositContext;
 
     /* ///////////////////////////////////////////////////////////////
                          HOOK DATA STRUCTURE
@@ -100,10 +100,9 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
 
     /// @inheritdoc IHook
     /// @param _previousHook The address of the previous hook in the chain
-    /// @param _smartAccount The address of the smart account executing the hook
     /// @param _data Encoded ApproveAndDepositData
     /// @return _executions Array of executions to perform
-    function buildExecutions(address _previousHook, address _smartAccount, bytes calldata _data)
+    function buildExecutions(address _previousHook, bytes calldata _data)
         external
         view
         override
@@ -138,7 +137,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
-                    this.resolveDynamicAmount.selector, _previousHook, _smartAccount, _depositData.vault, _asset
+                    this.resolveDynamicAmount.selector, _previousHook, _depositData.vault, _asset
                 )
             });
 
@@ -146,23 +145,21 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
             _executions[1] = Execution({
                 target: address(this),
                 value: 0,
-                callData: abi.encodeWithSelector(this.approveForDeposit.selector, _smartAccount, _depositData.vault)
+                callData: abi.encodeWithSelector(this.approveForDeposit.selector, _depositData.vault)
             });
 
             // Execution 2: Deposit assets into vault (amount will be resolved at runtime)
             _executions[2] = Execution({
                 target: address(this),
                 value: 0,
-                callData: abi.encodeWithSelector(this.executeDeposit.selector, _smartAccount, _depositData.receiver)
+                callData: abi.encodeWithSelector(this.executeDeposit.selector, _depositData.receiver)
             });
 
             // Execution 3: Store context for next hook
             _executions[3] = Execution({
                 target: address(this),
                 value: 0,
-                callData: abi.encodeWithSelector(
-                    this.storeDepositContext.selector, _smartAccount, _depositData.receiver
-                )
+                callData: abi.encodeWithSelector(this.storeDepositContext.selector, _depositData.receiver)
             });
 
             // Execution 4 (optional): Validate minimum shares received
@@ -206,7 +203,6 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
                 value: 0,
                 callData: abi.encodeWithSelector(
                     this.storeDepositContextStatic.selector,
-                    _smartAccount,
                     _depositData.vault,
                     _asset,
                     _depositData.assets,
@@ -231,18 +227,16 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     }
 
     /// @inheritdoc IHook
-    /// @param _caller The address initiating the hook execution
-    function initializeHookContext(address _caller) external override onlyOwner {
-        _executionContext[_caller] = true;
+    function initializeHookContext() external override onlyOwner {
+        _executionContext = true;
     }
 
     /// @inheritdoc IHook
-    /// @param _caller The address whose hook execution is finalizing
-    function finalizeHookContext(address _caller) external override onlyOwner {
-        _executionContext[_caller] = false;
+    function finalizeHookContext() external override onlyOwner {
+        _executionContext = false;
 
         // Clean up context data after execution completes
-        delete _depositContext[_caller];
+        delete _depositContext;
     }
 
     /// @inheritdoc IHook
@@ -262,10 +256,9 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookResult
-    /// @param _caller The account that executed the hook
     /// @return _outputAmount The amount of shares received from the deposit
-    function getOutputAmount(address _caller) external view override returns (uint256 _outputAmount) {
-        return _depositContext[_caller].sharesReceived;
+    function getOutputAmount() external view override returns (uint256 _outputAmount) {
+        return _depositContext.sharesReceived;
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -275,19 +268,15 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @notice Resolve the dynamic amount from the previous hook
     /// @dev Called during execution to get amount from previous hook's output
     /// @param _previousHook The address of the previous hook
-    /// @param _caller The address executing the hook chain
     /// @param _vault The vault address (stored for later use)
     /// @param _asset The asset address (stored for later use)
-    function resolveDynamicAmount(address _previousHook, address _caller, address _vault, address _asset)
-        external
-        onlyOwner
-    {
+    function resolveDynamicAmount(address _previousHook, address _vault, address _asset) external onlyOwner {
         // Get amount from previous hook
-        uint256 _amount = IHookResult(_previousHook).getOutputAmount(_caller);
+        uint256 _amount = IHookResult(_previousHook).getOutputAmount();
         require(_amount > 0, HOOK4626DEPOSIT_INVALID_HOOK_DATA);
 
         // Store temporary context with the resolved amount
-        _depositContext[_caller] = DepositContext({
+        _depositContext = DepositContext({
             vault: _vault,
             asset: _asset,
             assetsDeposited: _amount,
@@ -298,18 +287,16 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     }
 
     /// @notice Approve the vault to spend assets (for dynamic amount flow)
-    /// @param _caller The address executing the hook chain
     /// @param _vault The vault address
-    function approveForDeposit(address _caller, address _vault) external onlyOwner {
-        DepositContext memory _ctx = _depositContext[_caller];
+    function approveForDeposit(address _vault) external onlyOwner {
+        DepositContext memory _ctx = _depositContext;
         IERC20(_ctx.asset).approve(_vault, _ctx.assetsDeposited);
     }
 
     /// @notice Execute the deposit (for dynamic amount flow)
-    /// @param _caller The address executing the hook chain
     /// @param _receiver The address to receive the shares
-    function executeDeposit(address _caller, address _receiver) external onlyOwner {
-        DepositContext storage _ctx = _depositContext[_caller];
+    function executeDeposit(address _receiver) external onlyOwner {
+        DepositContext storage _ctx = _depositContext;
         IERC4626(_ctx.vault).deposit(_ctx.assetsDeposited, _receiver);
         _ctx.receiver = _receiver;
     }
@@ -320,10 +307,9 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
 
     /// @notice Store deposit context after execution (for dynamic amount flow)
     /// @dev Called as part of the execution chain to save final context
-    /// @param _caller The address executing the hook chain
     /// @param _receiver The address that received shares
-    function storeDepositContext(address _caller, address _receiver) external onlyOwner {
-        DepositContext storage _ctx = _depositContext[_caller];
+    function storeDepositContext(address _receiver) external onlyOwner {
+        DepositContext storage _ctx = _depositContext;
 
         // Get actual shares received
         uint256 _sharesReceived = IERC20(_ctx.vault).balanceOf(_receiver);
@@ -334,18 +320,11 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
 
     /// @notice Store deposit context after execution (for static amount flow)
     /// @dev Called as part of the execution chain to save context for next hook
-    /// @param _caller The address executing the hook chain
     /// @param _vault The vault address
     /// @param _asset The underlying asset address
     /// @param _assetsDeposited The amount of assets deposited
     /// @param _receiver The address that received shares
-    function storeDepositContextStatic(
-        address _caller,
-        address _vault,
-        address _asset,
-        uint256 _assetsDeposited,
-        address _receiver
-    )
+    function storeDepositContextStatic(address _vault, address _asset, uint256 _assetsDeposited, address _receiver)
         external
         onlyOwner
     {
@@ -353,7 +332,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
         uint256 _sharesReceived = IERC20(_vault).balanceOf(_receiver);
 
         // Store context
-        _depositContext[_caller] = DepositContext({
+        _depositContext = DepositContext({
             vault: _vault,
             asset: _asset,
             assetsDeposited: _assetsDeposited,
@@ -382,40 +361,35 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @notice Check if a caller has an active execution context
-    /// @param _caller The address to check
     /// @return _hasContext Whether the caller has an active execution context
-    function hasActiveContext(address _caller) external view returns (bool _hasContext) {
-        return _executionContext[_caller];
+    function hasActiveContext() external view returns (bool _hasContext) {
+        return _executionContext;
     }
 
     /// @notice Get the stored deposit context for a caller
     /// @dev Returns the context from the last deposit operation
     /// @dev This allows subsequent hooks to access deposit information
-    /// @param _caller The address to get context for
     /// @return _context The stored deposit context
-    function getDepositContext(address _caller) external view returns (DepositContext memory _context) {
-        return _depositContext[_caller];
+    function getDepositContext() external view returns (DepositContext memory _context) {
+        return _depositContext;
     }
 
     /// @notice Get the vault address from the last deposit
-    /// @param _caller The address to check
     /// @return _vault The vault address
-    function getLastVault(address _caller) external view returns (address _vault) {
-        return _depositContext[_caller].vault;
+    function getLastVault() external view returns (address _vault) {
+        return _depositContext.vault;
     }
 
     /// @notice Get the shares received from the last deposit
-    /// @param _caller The address to check
     /// @return _shares The amount of shares received
-    function getLastSharesReceived(address _caller) external view returns (uint256 _shares) {
-        return _depositContext[_caller].sharesReceived;
+    function getLastSharesReceived() external view returns (uint256 _shares) {
+        return _depositContext.sharesReceived;
     }
 
     /// @notice Get the assets deposited in the last operation
-    /// @param _caller The address to check
     /// @return _assets The amount of assets deposited
-    function getLastAssetsDeposited(address _caller) external view returns (uint256 _assets) {
-        return _depositContext[_caller].assetsDeposited;
+    function getLastAssetsDeposited() external view returns (uint256 _assets) {
+        return _depositContext.assetsDeposited;
     }
 
     /// @notice Preview the shares that would be received for a deposit

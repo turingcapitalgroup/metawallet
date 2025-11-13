@@ -17,26 +17,23 @@ interface IHook {
     /**
      * @notice Build the execution array for this hook
      * @param previousHook The previous hook in the chain (address(0) if first)
-     * @param smartAccount The account executing the hook
      * @param data Hook-specific configuration data
      * @return executions Array of executions including preHook, hook logic, and postHook
      */
-    function buildExecutions(address previousHook, address smartAccount, bytes calldata data)
+    function buildExecutions(address previousHook, bytes calldata data)
         external
         view
         returns (Execution[] memory executions);
 
     /**
      * @notice Set the execution context for this hook
-     * @param caller The address calling the hook
      */
-    function initializeHookContext(address caller) external;
+    function initializeHookContext() external;
 
     /**
      * @notice Reset the execution state after completion
-     * @param caller The address that executed the hook
      */
-    function finalizeHookContext(address caller) external;
+    function finalizeHookContext() external;
 
     /**
      * @notice Get the hook type
