@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.19;
 
-import { Test, Vm, console2 } from "forge-std/Test.sol";
+import { Test } from "forge-std/Test.sol";
 import { getTokensList } from "metawallet/test/helpers/Tokens.sol";
 import { Utilities } from "metawallet/test/utils/Utilities.sol";
 

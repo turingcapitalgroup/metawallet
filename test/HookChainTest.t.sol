@@ -5,7 +5,6 @@ pragma solidity ^0.8.20;
 import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 
 // External Libraries
-import { console2 } from "forge-std/console2.sol";
 import { ERC1967Factory } from "solady/utils/ERC1967Factory.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
@@ -19,14 +18,13 @@ import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 // Local Interfaces
 import { IERC4626 } from "metawallet/src/interfaces/IERC4626.sol";
 import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
-import { IHookResult } from "metawallet/src/interfaces/IHookResult.sol";
 import { IMetaWallet } from "metawallet/src/interfaces/IMetaWallet.sol";
 
 // Mock Contracts
 import { MockRegistry } from "metawallet/test/helpers/mocks/MockRegistry.sol";
 
 // Errors
-import "metawallet/src/errors/Errors.sol";
+import "metawallet/src/errors/Errors.sol" as Errors;
 
 contract HookChainTest is BaseTest {
     using SafeTransferLib for address;
@@ -251,14 +249,10 @@ contract HookChainTest is BaseTest {
         assertEq(_sharesA, 0);
         assertGt(_sharesB, 0);
         // Scale decimals because vault uses 18 decimals
-        assertApproxEqRel(
-            _sharesB, DEPOSIT_AMOUNT * 1e12, 0.1 ether
-        );
+        assertApproxEqRel(_sharesB, DEPOSIT_AMOUNT * 1e12, 0.1 ether);
     }
 
     function test_ComplexChain_WithSlippageProtection() public {
-        uint256 _initialUsdc = USDC_MAINNET.balanceOf(address(metaWallet));
-
         ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _deposit1 =
             ERC4626ApproveAndDepositHook.ApproveAndDepositData({
                 vault: address(VAULT_A),
@@ -315,7 +309,7 @@ contract HookChainTest is BaseTest {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
         vm.startPrank(users.owner);
-        vm.expectRevert(bytes(HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND));
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND));
         MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
     }
 
@@ -333,7 +327,7 @@ contract HookChainTest is BaseTest {
 
         // This should fail due to slippage check
         vm.startPrank(users.owner);
-        vm.expectRevert(bytes(HOOK4626DEPOSIT_INSUFFICIENT_SHARES));
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_INSUFFICIENT_SHARES));
         MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
     }
 

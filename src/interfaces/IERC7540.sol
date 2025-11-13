@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./IERC4626.sol";
+import { IERC4626 } from "./IERC4626.sol";
 
 /**
  * @title IERC7540

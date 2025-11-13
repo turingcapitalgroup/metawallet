@@ -14,12 +14,9 @@ import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount
 
 // Local Errors
 import {
-    HOOK4626DEPOSIT_HOOK_ALREADY_INITIALIZED,
-    HOOK4626DEPOSIT_HOOK_NOT_INITIALIZED,
     HOOK4626DEPOSIT_INSUFFICIENT_SHARES,
     HOOK4626DEPOSIT_INVALID_HOOK_DATA,
-    HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND,
-    HOOK4626DEPOSIT_PREVIOUS_HOOK_NO_OUTPUT
+    HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND
 } from "metawallet/src/errors/Errors.sol";
 
 /// @title ERC4626ApproveAndDepositHook
@@ -120,7 +117,6 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
         address _asset = IERC4626(_depositData.vault).asset();
 
         // Determine the actual amount to deposit
-        uint256 _actualAssets;
         bool _useDynamicAmount = _depositData.assets == USE_PREVIOUS_HOOK_OUTPUT;
 
         if (_useDynamicAmount) {
