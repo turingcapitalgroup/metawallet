@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import { Ownable } from "solady/auth/Ownable.sol";
+
 // Local Interfaces
 import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
 import { IERC4626 } from "metawallet/src/interfaces/IERC4626.sol";
@@ -16,6 +18,7 @@ import {
     HOOK4626DEPOSIT_HOOK_NOT_INITIALIZED,
     HOOK4626DEPOSIT_INSUFFICIENT_SHARES,
     HOOK4626DEPOSIT_INVALID_HOOK_DATA,
+    HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND,
     HOOK4626DEPOSIT_PREVIOUS_HOOK_NO_OUTPUT
 } from "metawallet/src/errors/Errors.sol";
 
@@ -27,7 +30,7 @@ import {
 ///      This is an INFLOW hook as it increases the vault share balance
 ///      Stores execution context that can be read by subsequent hooks in the chain
 ///      Supports dynamic amounts by reading from previous hook's output
-contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
+contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /* ///////////////////////////////////////////////////////////////
                               CONSTANTS
     ///////////////////////////////////////////////////////////////*/
@@ -87,6 +90,10 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
         uint256 minShares;
     }
 
+    constructor(address _owner) {
+        _initializeOwner(_owner);
+    }
+
     /* ///////////////////////////////////////////////////////////////
                          IHOOK IMPLEMENTATION
     ///////////////////////////////////////////////////////////////*/
@@ -100,6 +107,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
         external
         view
         override
+        onlyOwner
         returns (Execution[] memory _executions)
     {
         // Decode the hook data
@@ -118,7 +126,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
 
         if (_useDynamicAmount) {
             // Amount will be read from previous hook at execution time
-            require(_previousHook != address(0), HOOK4626DEPOSIT_PREVIOUS_HOOK_NO_OUTPUT);
+            require(_previousHook != address(0), HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND);
 
             // Build execution array with dynamic amount resolution
             // [getDynamicAmount, approve, deposit, storeContext, (optional) validate]
@@ -224,15 +232,13 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
 
     /// @inheritdoc IHook
     /// @param _caller The address initiating the hook execution
-    function initializeHookContext(address _caller) external override {
-        require(!_executionContext[_caller], HOOK4626DEPOSIT_HOOK_ALREADY_INITIALIZED);
+    function initializeHookContext(address _caller) external override onlyOwner {
         _executionContext[_caller] = true;
     }
 
     /// @inheritdoc IHook
     /// @param _caller The address whose hook execution is finalizing
-    function finalizeHookContext(address _caller) external override {
-        require(_executionContext[_caller], HOOK4626DEPOSIT_HOOK_NOT_INITIALIZED);
+    function finalizeHookContext(address _caller) external override onlyOwner {
         _executionContext[_caller] = false;
 
         // Clean up context data after execution completes
@@ -272,7 +278,10 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
     /// @param _caller The address executing the hook chain
     /// @param _vault The vault address (stored for later use)
     /// @param _asset The asset address (stored for later use)
-    function resolveDynamicAmount(address _previousHook, address _caller, address _vault, address _asset) external {
+    function resolveDynamicAmount(address _previousHook, address _caller, address _vault, address _asset)
+        external
+        onlyOwner
+    {
         // Get amount from previous hook
         uint256 _amount = IHookResult(_previousHook).getOutputAmount(_caller);
         require(_amount > 0, HOOK4626DEPOSIT_INVALID_HOOK_DATA);
@@ -291,7 +300,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
     /// @notice Approve the vault to spend assets (for dynamic amount flow)
     /// @param _caller The address executing the hook chain
     /// @param _vault The vault address
-    function approveForDeposit(address _caller, address _vault) external {
+    function approveForDeposit(address _caller, address _vault) external onlyOwner {
         DepositContext memory _ctx = _depositContext[_caller];
         IERC20(_ctx.asset).approve(_vault, _ctx.assetsDeposited);
     }
@@ -299,7 +308,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
     /// @notice Execute the deposit (for dynamic amount flow)
     /// @param _caller The address executing the hook chain
     /// @param _receiver The address to receive the shares
-    function executeDeposit(address _caller, address _receiver) external {
+    function executeDeposit(address _caller, address _receiver) external onlyOwner {
         DepositContext storage _ctx = _depositContext[_caller];
         IERC4626(_ctx.vault).deposit(_ctx.assetsDeposited, _receiver);
         _ctx.receiver = _receiver;
@@ -313,7 +322,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
     /// @dev Called as part of the execution chain to save final context
     /// @param _caller The address executing the hook chain
     /// @param _receiver The address that received shares
-    function storeDepositContext(address _caller, address _receiver) external {
+    function storeDepositContext(address _caller, address _receiver) external onlyOwner {
         DepositContext storage _ctx = _depositContext[_caller];
 
         // Get actual shares received
@@ -338,6 +347,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
         address _receiver
     )
         external
+        onlyOwner
     {
         // Get actual shares received
         uint256 _sharesReceived = IERC20(_vault).balanceOf(_receiver);
@@ -362,7 +372,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult {
     /// @param _vault The vault to check
     /// @param _receiver The address to check balance for
     /// @param _minShares The minimum expected shares
-    function validateMinShares(address _vault, address _receiver, uint256 _minShares) external view {
+    function validateMinShares(address _vault, address _receiver, uint256 _minShares) external view onlyOwner {
         uint256 _shares = IERC20(_vault).balanceOf(_receiver);
         require(_shares >= _minShares, HOOK4626DEPOSIT_INSUFFICIENT_SHARES);
     }

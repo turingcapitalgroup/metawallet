@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import { Ownable } from "solady/auth/Ownable.sol";
+
 // Local Interfaces
 import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
 import { IERC4626 } from "metawallet/src/interfaces/IERC4626.sol";
@@ -25,7 +27,7 @@ import {
 ///      This is an OUTFLOW hook as it decreases the vault share balance
 ///      Stores execution context that can be read by subsequent hooks in the chain
 ///      Supports dynamic amounts by reading from previous hook's output
-contract ERC4626RedeemHook is IHook, IHookResult {
+contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     /* ///////////////////////////////////////////////////////////////
                               CONSTANTS
     ///////////////////////////////////////////////////////////////*/
@@ -89,6 +91,10 @@ contract ERC4626RedeemHook is IHook, IHookResult {
         uint256 minAssets;
     }
 
+    constructor(address _owner) {
+        _initializeOwner(_owner);
+    }
+
     /* ///////////////////////////////////////////////////////////////
                          IHOOK IMPLEMENTATION
     ///////////////////////////////////////////////////////////////*/
@@ -102,6 +108,7 @@ contract ERC4626RedeemHook is IHook, IHookResult {
         external
         view
         override
+        onlyOwner
         returns (Execution[] memory _executions)
     {
         // Decode the hook data
@@ -124,7 +131,7 @@ contract ERC4626RedeemHook is IHook, IHookResult {
 
             // Build execution array with dynamic amount resolution
             // [getDynamicAmount, redeem, storeContext, (optional) validate]
-            uint256 _execCount = _redeemData.minAssets > 0 ? 4 : 3;
+            uint256 _execCount = _redeemData.minAssets > 0 ? 5 : 4;
             _executions = new Execution[](_execCount);
 
             // Execution 0: Get amount from previous hook
@@ -141,23 +148,30 @@ contract ERC4626RedeemHook is IHook, IHookResult {
                 )
             });
 
-            // Execution 1: Redeem shares from vault (amount will be resolved at runtime)
+            // Execution 1: Approve vault shares to hook
             _executions[1] = Execution({
+                target: _redeemData.vault, // vault address
+                value: 0,
+                callData: abi.encodeWithSelector(IERC20.approve.selector, address(this), _redeemData.shares)
+            });
+
+            // Execution 2: Redeem shares from vault (amount will be resolved at runtime)
+            _executions[2] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(this.executeRedeem.selector, _smartAccount, _redeemData.receiver)
             });
 
-            // Execution 2: Store context for next hook
-            _executions[2] = Execution({
+            // Execution 3: Store context for next hook
+            _executions[3] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(this.storeRedeemContext.selector, _smartAccount, _redeemData.receiver)
             });
 
-            // Execution 3 (optional): Validate minimum assets received
+            // Execution 4 (optional): Validate minimum assets received
             if (_redeemData.minAssets > 0) {
-                _executions[3] = Execution({
+                _executions[4] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(
@@ -212,15 +226,13 @@ contract ERC4626RedeemHook is IHook, IHookResult {
 
     /// @inheritdoc IHook
     /// @param _caller The address initiating the hook execution
-    function initializeHookContext(address _caller) external override {
-        require(!_executionContext[_caller], HOOK4626REDEEM_HOOK_ALREADY_INITIALIZED);
+    function initializeHookContext(address _caller) external override onlyOwner {
         _executionContext[_caller] = true;
     }
 
     /// @inheritdoc IHook
     /// @param _caller The address whose hook execution is finalizing
-    function finalizeHookContext(address _caller) external override {
-        require(_executionContext[_caller], HOOK4626REDEEM_HOOK_NOT_INITIALIZED);
+    function finalizeHookContext(address _caller) external override onlyOwner {
         _executionContext[_caller] = false;
 
         // Clean up context data after execution completes
@@ -289,7 +301,7 @@ contract ERC4626RedeemHook is IHook, IHookResult {
     /// @notice Execute the redemption (for dynamic amount flow)
     /// @param _caller The address executing the hook chain
     /// @param _receiver The address to receive the assets
-    function executeRedeem(address _caller, address _receiver) external {
+    function executeRedeem(address _caller, address _receiver) external onlyOwner {
         RedeemContext storage _ctx = _redeemContext[_caller];
         IERC4626(_ctx.vault).redeem(_ctx.sharesRedeemed, _receiver, _ctx.owner);
         _ctx.receiver = _receiver;
@@ -303,7 +315,7 @@ contract ERC4626RedeemHook is IHook, IHookResult {
     /// @dev Called as part of the execution chain to save final context
     /// @param _caller The address executing the hook chain
     /// @param _receiver The address that received assets
-    function storeRedeemContext(address _caller, address _receiver) external {
+    function storeRedeemContext(address _caller, address _receiver) external onlyOwner {
         RedeemContext storage _ctx = _redeemContext[_caller];
 
         // Get actual assets received
@@ -330,6 +342,7 @@ contract ERC4626RedeemHook is IHook, IHookResult {
         address _owner
     )
         external
+        onlyOwner
     {
         // Get actual assets received
         uint256 _assetsReceived = IERC20(_asset).balanceOf(_receiver);
@@ -355,7 +368,7 @@ contract ERC4626RedeemHook is IHook, IHookResult {
     /// @param _asset The asset token address
     /// @param _receiver The address to check balance for
     /// @param _minAssets The minimum expected assets
-    function validateMinAssets(address _asset, address _receiver, uint256 _minAssets) external view {
+    function validateMinAssets(address _asset, address _receiver, uint256 _minAssets) external view onlyOwner {
         uint256 _balance = IERC20(_asset).balanceOf(_receiver);
         require(_balance >= _minAssets, HOOK4626REDEEM_INSUFFICIENT_ASSETS);
     }
