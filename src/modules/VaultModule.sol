@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// 1. External Libraries
 import { OwnableRoles } from "solady/auth/OwnableRoles.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 
-// 3. Local Interfaces
 import { IModule } from "kam/interfaces/modules/IModule.sol";
 import { IVaultModule } from "metawallet/src/interfaces/IVaultModule.sol";
 
-// 4. Local Contracts (or base/lib contracts like ERC7540)
 import { ERC7540, SafeTransferLib } from "../lib/ERC7540.sol";
 
 /// @title VaultModule
@@ -65,13 +62,13 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         onlyRoles(ADMIN_ROLE)
     {
         VaultModuleStorage storage $ = _getVaultModuleStorage();
-        if ($.initialized) revert("helllo");
+        if ($.initialized) revert();
         $.asset = _asset;
         $.name = _name;
         $.symbol = _symbol;
         // Try to get asset decimals, revert if unsuccessful
         (bool success, uint8 result) = _tryGetAssetDecimals(_asset);
-        if (!success) revert("hi");
+        if (!success) revert();
         $.decimals = result;
     }
 
@@ -98,8 +95,17 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @dev The redeem amount is limited by the claimable redeem requests of the user
     function maxRedeem(address owner) public view override returns (uint256 shares) {
         uint256 _totalIdleShares = convertToShares(totalIdle());
-        uint256 pendingShares = pendingRedeemRequest(owner);
-        return _totalIdleShares > pendingShares ? pendingShares : pendingShares - _totalIdleShares;
+        uint256 pendingShares = super.pendingRedeemRequest(owner);
+        return _totalIdleShares >= pendingShares ? pendingShares : _totalIdleShares;
+    }
+
+    /// @notice Returns the pending redemption request amount for a controller
+    /// @param controller Address to check pending redemption for
+    /// @return Amount of shares pending redemption
+    function pendingRedeemRequest(address controller) public view override returns (uint256) {
+        uint256 pending = super.pendingRedeemRequest(controller);
+        // substract claimable shares
+        return pending - maxRedeem(controller);
     }
 
     /// @notice Claims processed redemption request
@@ -128,6 +134,16 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _fulfillRedeemRequest(shares, assets, controller, true);
         _validateController(controller);
         (, shares) = _withdraw(assets, shares, to, controller);
+    }
+
+    function _withdraw(uint256 assets, uint256 shares, address receiver, address controller)
+        internal
+        override
+        returns (uint256 assetsReturn, uint256 sharesReturn)
+    {
+        // burn shares to instantly fulfill request
+        _burn(address(this), shares);
+        return super._withdraw(assets, shares, receiver, controller);
     }
 
     /* //////////////////////////////////////////////////////////////
@@ -277,7 +293,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @inheritdoc IModule
     function selectors() external pure returns (bytes4[] memory _selectors) {
-        _selectors = new bytes4[](40);
+        _selectors = new bytes4[](41);
         _selectors[0] = this.DOMAIN_SEPARATOR.selector;
         _selectors[1] = this.allowance.selector;
         _selectors[2] = this.approve.selector;
@@ -318,6 +334,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _selectors[37] = this.claimableRedeemRequest.selector;
         _selectors[38] = this.pendingDepositRequest.selector;
         _selectors[39] = this.pendingRedeemRequest.selector;
+        _selectors[40] = this.sharePrice.selector;
         return _selectors;
     }
 }

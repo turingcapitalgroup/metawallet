@@ -58,7 +58,7 @@ interface IERC7540 is IERC4626 {
      */
     function pendingDepositRequest(address controller) external view returns (uint256 assets);
 
-     /**
+    /**
      * @dev Returns the amount of requested assets claimable for a controller
      * @param controller The address to check
      * @return assets The amount of assets claimable
@@ -72,7 +72,7 @@ interface IERC7540 is IERC4626 {
      */
     function pendingRedeemRequest(address controller) external view returns (uint256 shares);
 
-      /**
+    /**
      * @dev Returns the amount of requested shares claimable for a controller
      * @param controller The address to check
      * @return shares The amount of shares claimable
