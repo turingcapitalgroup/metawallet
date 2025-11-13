@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// External Libraries
+import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
+
+// Local Interfaces
 import { IHook } from "metawallet/src/interfaces/IHook.sol";
 import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
-import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
 
 /// @title HookExecution
 /// @notice Abstract contract providing multi-hook execution capabilities
@@ -47,53 +50,53 @@ abstract contract HookExecution is IHookExecution {
     ///////////////////////////////////////////////////////////////*/
 
     /// @notice Install a hook with a unique identifier
-    /// @param hookId Unique identifier for the hook (e.g., keccak256("deposit.erc4626"))
-    /// @param hookAddress Address of the hook contract
-    function _installHook(bytes32 hookId, address hookAddress) internal {
-        if (hookAddress == address(0)) revert InvalidHookAddress();
+    /// @param _hookId Unique identifier for the hook (e.g., keccak256("deposit.erc4626"))
+    /// @param _hookAddress Address of the hook contract
+    function _installHook(bytes32 _hookId, address _hookAddress) internal {
+        if (_hookAddress == address(0)) revert InvalidHookAddress();
 
         HookExecutionStorage storage $ = _getHookExecutionStorage();
-        if ($.hooks[hookId] != address(0)) revert HookAlreadyInstalled(hookId);
+        if ($.hooks[_hookId] != address(0)) revert HookAlreadyInstalled(_hookId);
 
-        $.hooks[hookId] = hookAddress;
-        $.hookIds.push(hookId);
+        $.hooks[_hookId] = _hookAddress;
+        $.hookIds.push(_hookId);
 
-        emit HookInstalled(hookId, hookAddress);
+        emit HookInstalled(_hookId, _hookAddress);
     }
 
     /// @notice Uninstall a hook
-    /// @param hookId Identifier of the hook to uninstall
-    function _uninstallHook(bytes32 hookId) internal {
+    /// @param _hookId Identifier of the hook to uninstall
+    function _uninstallHook(bytes32 _hookId) internal {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
-        address hookAddress = $.hooks[hookId];
-        if (hookAddress == address(0)) revert HookNotInstalled(hookId);
+        address _hookAddress = $.hooks[_hookId];
+        if (_hookAddress == address(0)) revert HookNotInstalled(_hookId);
 
-        delete $.hooks[hookId];
+        delete $.hooks[_hookId];
 
         // Remove from array
-        bytes32[] storage hookIds = $.hookIds;
-        for (uint256 i = 0; i < hookIds.length; i++) {
-            if (hookIds[i] == hookId) {
-                hookIds[i] = hookIds[hookIds.length - 1];
-                hookIds.pop();
+        bytes32[] storage _hookIds = $.hookIds;
+        for (uint256 _i = 0; _i < _hookIds.length; _i++) {
+            if (_hookIds[_i] == _hookId) {
+                _hookIds[_i] = _hookIds[_hookIds.length - 1];
+                _hookIds.pop();
                 break;
             }
         }
 
-        emit HookUninstalled(hookId, hookAddress);
+        emit HookUninstalled(_hookId, _hookAddress);
     }
 
     /// @notice Get a hook address by identifier
-    /// @param hookId The hook identifier
-    /// @return The hook address (address(0) if not installed)
-    function _getHook(bytes32 hookId) internal view returns (address) {
+    /// @param _hookId The hook identifier
+    /// @return _hookAddress The hook address (address(0) if not installed)
+    function _getHook(bytes32 _hookId) internal view returns (address _hookAddress) {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
-        return $.hooks[hookId];
+        return $.hooks[_hookId];
     }
 
     /// @notice Get all installed hook identifiers
-    /// @return Array of hook identifiers
-    function _getInstalledHookExecution() internal view returns (bytes32[] memory) {
+    /// @return _hookIds Array of hook identifiers
+    function _getInstalledHookExecution() internal view returns (bytes32[] memory _hookIds) {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
         return $.hookIds;
     }
@@ -104,100 +107,111 @@ abstract contract HookExecution is IHookExecution {
 
     /// @notice Execute a chain of hooks
     /// @dev Each hook builds its own execution logic, and hooks can chain together
-    /// @param hookExecutions Array of hook executions to execute in sequence
-    /// @return results Final execution results
-    function _executeHookExecution(HookExecution[] calldata hookExecutions) internal returns (bytes[] memory results) {
-        if (hookExecutions.length == 0) revert EmptyHookChain();
+    /// @param _hookExecutions Array of hook executions to execute in sequence
+    /// @return _results Final execution results
+    function _executeHookExecution(HookExecution[] calldata _hookExecutions)
+        internal
+        returns (bytes[] memory _results)
+    {
+        if (_hookExecutions.length == 0) revert EmptyHookChain();
 
         // Build the complete execution sequence by chaining all hooks
-        Execution[] memory allExecutions = _buildExecutionChain(hookExecutions);
+        Execution[] memory _allExecutions = _buildExecutionChain(_hookExecutions);
 
         // Execute all operations in sequence
-        return _processHookChain(allExecutions, hookExecutions);
+        return _processHookChain(_allExecutions, _hookExecutions);
     }
 
     /// @notice Build the complete execution chain from all hooks
     /// @dev Each hook's buildExecutions() returns [preHook, ...operations, postHook]
-    function _buildExecutionChain(HookExecution[] calldata hookExecutions)
+    /// @param _hookExecutions Array of hook executions to build chain from
+    /// @return _allExecutions Complete array of executions to perform
+    function _buildExecutionChain(HookExecution[] calldata _hookExecutions)
         internal
         view
-        returns (Execution[] memory allExecutions)
+        returns (Execution[] memory _allExecutions)
     {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
 
         // First pass: count total executions needed
-        uint256 totalExecutions = 0;
-        for (uint256 i = 0; i < hookExecutions.length; i++) {
-            address hookAddress = $.hooks[hookExecutions[i].hookId];
-            if (hookAddress == address(0)) revert HookNotInstalled(hookExecutions[i].hookId);
+        uint256 _totalExecutions = 0;
+        for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
+            address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
+            if (_hookAddress == address(0)) revert HookNotInstalled(_hookExecutions[_i].hookId);
 
-            address previousHook = i > 0 ? $.hooks[hookExecutions[i - 1].hookId] : address(0);
-            Execution[] memory hookExecs =
-                IHook(hookAddress).buildExecutions(previousHook, address(this), hookExecutions[i].data);
-            totalExecutions += hookExecs.length;
+            address _previousHook = _i > 0 ? $.hooks[_hookExecutions[_i - 1].hookId] : address(0);
+            Execution[] memory _hookExecs =
+                IHook(_hookAddress).buildExecutions(_previousHook, address(this), _hookExecutions[_i].data);
+            _totalExecutions += _hookExecs.length;
         }
 
         // Second pass: build the complete execution array
-        allExecutions = new Execution[](totalExecutions);
-        uint256 execIndex = 0;
+        _allExecutions = new Execution[](_totalExecutions);
+        uint256 _execIndex = 0;
 
-        for (uint256 i = 0; i < hookExecutions.length; i++) {
-            address hookAddress = $.hooks[hookExecutions[i].hookId];
-            address previousHook = i > 0 ? $.hooks[hookExecutions[i - 1].hookId] : address(0);
+        for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
+            address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
+            address _previousHook = _i > 0 ? $.hooks[_hookExecutions[_i - 1].hookId] : address(0);
 
-            Execution[] memory hookExecs =
-                IHook(hookAddress).buildExecutions(previousHook, address(this), hookExecutions[i].data);
+            Execution[] memory _hookExecs =
+                IHook(_hookAddress).buildExecutions(_previousHook, address(this), _hookExecutions[_i].data);
 
             // Copy hook executions into the main array
-            for (uint256 j = 0; j < hookExecs.length; j++) {
-                allExecutions[execIndex++] = hookExecs[j];
+            for (uint256 _j = 0; _j < _hookExecs.length; _j++) {
+                _allExecutions[_execIndex++] = _hookExecs[_j];
             }
         }
     }
 
     /// @notice Execute the complete hook chain
     /// @dev Sets up execution context, executes all operations, and cleans up
-    function _processHookChain(Execution[] memory executions, HookExecution[] calldata hookExecutions)
+    /// @param _executions Array of executions to perform
+    /// @param _hookExecutions Array of hook execution metadata
+    /// @return _results Results from each execution
+    function _processHookChain(Execution[] memory _executions, HookExecution[] calldata _hookExecutions)
         internal
-        returns (bytes[] memory results)
+        returns (bytes[] memory _results)
     {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
 
         // Set execution context for all hooks
-        for (uint256 i = 0; i < hookExecutions.length; i++) {
-            address hookAddress = $.hooks[hookExecutions[i].hookId];
-            IHook(hookAddress).initializeHookContext(address(this));
-            emit HookExecutionStarted(hookExecutions[i].hookId, hookAddress);
+        for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
+            address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
+            IHook(_hookAddress).initializeHookContext(address(this));
+            emit HookExecutionStarted(_hookExecutions[_i].hookId, _hookAddress);
         }
 
         // Execute all operations using the implementation's _exec function
-        results = _executeOperations(executions);
+        _results = _executeOperations(_executions);
 
         // Reset execution state for all hooks
-        for (uint256 i = 0; i < hookExecutions.length; i++) {
-            address hookAddress = $.hooks[hookExecutions[i].hookId];
-            IHook(hookAddress).finalizeHookContext(address(this));
-            emit HookExecutionCompleted(hookExecutions[i].hookId, hookAddress);
+        for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
+            address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
+            IHook(_hookAddress).finalizeHookContext(address(this));
+            emit HookExecutionCompleted(_hookExecutions[_i].hookId, _hookAddress);
         }
     }
 
     /// @notice Execute the operations
     /// @dev Must be implemented by the inheriting contract to perform actual execution
-    /// @param executions Array of executions to perform
-    /// @return results Results from each execution
-    function _executeOperations(Execution[] memory executions) internal virtual returns (bytes[] memory results);
+    /// @param _executions Array of executions to perform
+    /// @return _results Results from each execution
+    function _executeOperations(Execution[] memory _executions) internal virtual returns (bytes[] memory _results);
 
     /* ///////////////////////////////////////////////////////////////
                           VIEW FUNCTIONS
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookExecution
-    function getHook(bytes32 hookId) external view returns (address) {
-        return _getHook(hookId);
+    /// @param _hookId The hook identifier to query
+    /// @return _hookAddress The address of the hook
+    function getHook(bytes32 _hookId) external view returns (address _hookAddress) {
+        return _getHook(_hookId);
     }
 
     /// @inheritdoc IHookExecution
-    function getInstalledHookExecution() external view returns (bytes32[] memory) {
+    /// @return _hookIds Array of all installed hook identifiers
+    function getInstalledHookExecution() external view returns (bytes32[] memory _hookIds) {
         return _getInstalledHookExecution();
     }
 }
