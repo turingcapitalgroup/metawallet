@@ -4,11 +4,7 @@ out = "out"
 libs = ["dependencies"]
 gas_reports = ['*']
 solc_version = "0.8.30"
-optimizer = true
-optimizer_runs = 10_000
-via_ir = true
-ffi = true
-ast = true
+zast = true
 build_info = true
 extra_output = ["storageLayout"]
 dynamic_test_linking = true
@@ -32,13 +28,13 @@ multiline_func_header = "all"
 number_underscore = "thousands"
 quote_style = "double"
 tab_width = 4
-wrap_comments = true
 sort_imports = true
 
 [dependencies]
 solady = "0.1.26"
-erc7579-minimal = { version = "1.0", git = "https://github.com/turingcapitalgroup/erc7579-minimal.git", rev = "4c9ecacbb52cb1007f1d7f99bc53646bb6db129a" }
 kam = { version = "1.0", git = "https://github.com/turingcapitalgroup/kam.git", rev = "bc3b567962df48f8c70ec2c2eafc696b872453fc" }
+minimal-smart-account = { version = "1.0", git = "https://github.com/turingcapitalgroup/minimal-smart-account.git", rev = "d2c304a9f64f445a4566f81efd792ac25a129371" }
+forge-std = "1.11.0"
 
 [soldeer]
 # whether soldeer manages remappings

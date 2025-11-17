@@ -4,7 +4,6 @@ pragma solidity ^0.8.19;
 import { ERC7540Lib, ERC7540_FilledRequest, ERC7540_Request } from "./ERC7540Types.sol";
 
 import { ERC4626 } from "solady/tokens/ERC4626.sol";
-import { FixedPointMathLib } from "solady/utils/FixedPointMathLib.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 /// @notice Simple ERC7540 async Tokenized Vault implementation
@@ -79,7 +78,7 @@ abstract contract ERC7540 is ERC4626 {
     bytes32 private constant ERC7540_STORAGE_LOCATION =
         0x1f258c11921df783aee40e51a8bea706dacc811ab5bbdb895d3bfcffe1a3ff00;
 
-    function _getERC7540Storage() private pure returns (ERC7540Storage storage $) {
+    function _getERC7540Storage() internal pure returns (ERC7540Storage storage $) {
         assembly {
             $.slot := ERC7540_STORAGE_LOCATION
         }
@@ -156,11 +155,7 @@ abstract contract ERC7540 is ERC4626 {
     /// @param owner the source of the deposit assets
     ///
     /// NOTE: most implementations will require pre-approval of the Vault with the Vault's underlying asset token.
-    function requestDeposit(
-        uint256 assets,
-        address controller,
-        address owner
-    )
+    function requestDeposit(uint256 assets, address controller, address owner)
         public
         virtual
         returns (uint256 requestId)
@@ -180,11 +175,7 @@ abstract contract ERC7540 is ERC4626 {
     /// @param owner the source of the shares to be redeemed
     ///
     /// NOTE: most implementations will require pre-approval of the Vault with the Vault's share token.
-    function requestRedeem(
-        uint256 shares,
-        address controller,
-        address owner
-    )
+    function requestRedeem(uint256 shares, address controller, address owner)
         public
         virtual
         returns (uint256 requestId)
@@ -299,12 +290,7 @@ abstract contract ERC7540 is ERC4626 {
         return maxRedeem(controller);
     }
 
-    function _deposit(
-        uint256 assets,
-        uint256 shares,
-        address receiver,
-        address controller
-    )
+    function _deposit(uint256 assets, uint256 shares, address receiver, address controller)
         internal
         virtual
         returns (uint256 sharesReturn, uint256 assetsReturn)
@@ -333,12 +319,7 @@ abstract contract ERC7540 is ERC4626 {
         return (shares, assets);
     }
 
-    function _withdraw(
-        uint256 assets,
-        uint256 shares,
-        address receiver,
-        address controller
-    )
+    function _withdraw(uint256 assets, uint256 shares, address receiver, address controller)
         internal
         virtual
         returns (uint256 assetsReturn, uint256 sharesReturn)
@@ -367,12 +348,7 @@ abstract contract ERC7540 is ERC4626 {
         return (assets, shares);
     }
 
-    function _requestDeposit(
-        uint256 assets,
-        address controller,
-        address owner,
-        address source
-    )
+    function _requestDeposit(uint256 assets, address controller, address owner, address source)
         internal
         virtual
         returns (uint256 requestId)
@@ -386,12 +362,7 @@ abstract contract ERC7540 is ERC4626 {
         return 0;
     }
 
-    function _requestRedeem(
-        uint256 shares,
-        address controller,
-        address owner,
-        address source
-    )
+    function _requestRedeem(uint256 shares, address controller, address owner, address source)
         internal
         virtual
         returns (uint256 requestId)
@@ -418,7 +389,7 @@ abstract contract ERC7540 is ERC4626 {
     }
 
     /// @dev Performs operator and controller permission checks
-    function _validateController(address controller) private view {
+    function _validateController(address controller) internal view {
         if (msg.sender != controller && !_getERC7540Storage().isOperator[controller][msg.sender]) {
             revert InvalidController();
         }
@@ -429,11 +400,7 @@ abstract contract ERC7540 is ERC4626 {
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
     /// @dev Hook that is called when processing a deposit request and make it claimable.
-    function _fulfillDepositRequest(
-        address controller,
-        uint256 assetsFulfilled,
-        uint256 sharesMinted
-    )
+    function _fulfillDepositRequest(address controller, uint256 assetsFulfilled, uint256 sharesMinted)
         internal
         virtual
     {
@@ -446,12 +413,7 @@ abstract contract ERC7540 is ERC4626 {
 
     /// @dev Hook that is called when processing a redeem request and make it claimable.
     /// @dev It assumes user transferred its shares to the contract when requesting a redeem
-    function _fulfillRedeemRequest(
-        uint256 sharesFulfilled,
-        uint256 assetsWithdrawn,
-        address controller,
-        bool strict
-    )
+    function _fulfillRedeemRequest(uint256 sharesFulfilled, uint256 assetsWithdrawn, address controller, bool strict)
         internal
         virtual
     {
