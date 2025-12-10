@@ -20,7 +20,10 @@ interface IHook {
      * @param data Hook-specific configuration data
      * @return executions Array of executions including preHook, hook logic, and postHook
      */
-    function buildExecutions(address previousHook, bytes calldata data)
+    function buildExecutions(
+        address previousHook,
+        bytes calldata data
+    )
         external
         view
         returns (Execution[] memory executions);

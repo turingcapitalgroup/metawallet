@@ -10,7 +10,7 @@ import { IVaultModule } from "metawallet/src/interfaces/IVaultModule.sol";
 import { ERC7540, SafeTransferLib } from "../lib/ERC7540.sol";
 
 /// @title VaultModule
-/// @notice A module for managing vault assets and settlement proposals.
+/// @notice A module for managing vault assets with virtual totalAssets tracking.
 /// All state is stored in a single, unique storage slot to prevent collisions.
 contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     using SafeTransferLib for address;
@@ -19,24 +19,22 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
                           ERRORS
     //////////////////////////////////////////////////////////////*/
 
-    string constant NO_ACTIVE_PROPOSAL = "MW1";
-    string constant COOLDOWN_NOT_ELAPSED = "MW2";
-    string constant MISMATCHED_ARRAYS = "MW3";
+    string constant VAULT_PAUSED = "MW1";
+    string constant MISMATCHED_ARRAYS = "MW2";
 
     /* //////////////////////////////////////////////////////////////
                           STATE & ROLES
     //////////////////////////////////////////////////////////////*/
     uint256 public constant ADMIN_ROLE = _ROLE_0;
     uint256 public constant MANAGER_ROLE = _ROLE_4;
-    uint256 public constant GUARDIAN_ROLE = _ROLE_5;
+    uint256 public constant EMERGENCY_ADMIN_ROLE = _ROLE_6;
 
     // Struct that holds all state for this module, stored at a single unique slot
     struct VaultModuleStorage {
-        uint256 totalExternalAssets;
+        uint256 virtualTotalAssets; // Virtual total assets, updated on deposit/redeem
         bytes32 merkleRoot;
-        uint256 cooldownPeriod;
-        SettlementProposal currentProposal;
         bool initialized;
+        bool paused;
         address asset;
         string name;
         string symbol;
@@ -56,8 +54,21 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         }
     }
 
+    /* //////////////////////////////////////////////////////////////
+                          MODIFIERS
+    //////////////////////////////////////////////////////////////*/
+
+    modifier whenNotPaused() {
+        require(!_getVaultModuleStorage().paused, VAULT_PAUSED);
+        _;
+    }
+
     /// @inheritdoc IVaultModule
-    function initializeVault(address _asset, string memory _name, string memory _symbol)
+    function initializeVault(
+        address _asset,
+        string memory _name,
+        string memory _symbol
+    )
         external
         onlyRoles(ADMIN_ROLE)
     {
@@ -70,6 +81,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         (bool success, uint8 result) = _tryGetAssetDecimals(_asset);
         if (!success) revert();
         $.decimals = result;
+        $.initialized = true;
     }
 
     /* //////////////////////////////////////////////////////////////
@@ -81,15 +93,62 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @param controller the controller of the request who will be able to operate the request
     /// @param owner the owner of the shares to be deposited
     /// @return requestId
-    function requestDeposit(uint256 assets, address controller, address owner)
+    function requestDeposit(
+        uint256 assets,
+        address controller,
+        address owner
+    )
         public
         override
+        whenNotPaused
         returns (uint256 requestId)
     {
         if (owner != msg.sender) revert InvalidOperator();
         requestId = super.requestDeposit(assets, controller, owner);
         // fulfill the request directly
         _fulfillDepositRequest(controller, assets, convertToShares(assets));
+    }
+
+    /// @dev Override deposit to add whenNotPaused
+    function deposit(uint256 assets, address receiver) public override whenNotPaused returns (uint256 shares) {
+        shares = this.deposit(assets, receiver, msg.sender);
+    }
+
+    /// @dev Override deposit with controller to update virtualTotalAssets
+    function deposit(
+        uint256 assets,
+        address receiver,
+        address controller
+    )
+        public
+        override
+        whenNotPaused
+        returns (uint256 shares)
+    {
+        shares = super.deposit(assets, receiver, controller);
+        // Increase virtual total assets when shares are minted
+        _getVaultModuleStorage().virtualTotalAssets += assets;
+    }
+
+    /// @dev Override mint to add whenNotPaused
+    function mint(uint256 shares, address receiver) public override whenNotPaused returns (uint256 assets) {
+        assets = this.mint(shares, receiver, msg.sender);
+    }
+
+    /// @dev Override mint with controller to update virtualTotalAssets
+    function mint(
+        uint256 shares,
+        address receiver,
+        address controller
+    )
+        public
+        override
+        whenNotPaused
+        returns (uint256 assets)
+    {
+        assets = super.mint(shares, receiver, controller);
+        // Increase virtual total assets when shares are minted
+        _getVaultModuleStorage().virtualTotalAssets += assets;
     }
 
     /// @dev The redeem amount is limited by the claimable redeem requests of the user
@@ -114,12 +173,24 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @param to Address to receive the assets
     /// @param controller Controller of the redemption request
     /// @return assets Amount of assets returned
-    function redeem(uint256 shares, address to, address controller) public virtual override returns (uint256 assets) {
+    function redeem(
+        uint256 shares,
+        address to,
+        address controller
+    )
+        public
+        virtual
+        override
+        whenNotPaused
+        returns (uint256 assets)
+    {
         if (shares > maxRedeem(controller)) revert RedeemMoreThanMax();
         assets = convertToAssets(shares);
         _fulfillRedeemRequest(shares, assets, controller, true);
         _validateController(controller);
         (assets,) = _withdraw(assets, shares, to, controller);
+        // Decrease virtual total assets when assets are withdrawn
+        _getVaultModuleStorage().virtualTotalAssets -= assets;
     }
 
     /// @notice Claims processed redemption request for exact assets
@@ -128,15 +199,32 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @param to Address to receive the assets
     /// @param controller Controller of the redemption request
     /// @return shares Amount of shares burned
-    function withdraw(uint256 assets, address to, address controller) public virtual override returns (uint256 shares) {
+    function withdraw(
+        uint256 assets,
+        address to,
+        address controller
+    )
+        public
+        virtual
+        override
+        whenNotPaused
+        returns (uint256 shares)
+    {
         if (assets > maxWithdraw(controller)) revert WithdrawMoreThanMax();
         shares = convertToAssets(assets);
         _fulfillRedeemRequest(shares, assets, controller, true);
         _validateController(controller);
         (, shares) = _withdraw(assets, shares, to, controller);
+        // Decrease virtual total assets when assets are withdrawn
+        _getVaultModuleStorage().virtualTotalAssets -= assets;
     }
 
-    function _withdraw(uint256 assets, uint256 shares, address receiver, address controller)
+    function _withdraw(
+        uint256 assets,
+        uint256 shares,
+        address receiver,
+        address controller
+    )
         internal
         override
         returns (uint256 assetsReturn, uint256 sharesReturn)
@@ -175,10 +263,10 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         return convertToAssets(10 ** decimals());
     }
 
-    /// @notice Returns the current total assets recorded for the vault.
-    /// @return _assets The total assets, excluding pending deposit requests.
+    /// @notice Returns the virtual total assets of the vault.
+    /// @return _assets The virtual total assets (updated on deposit/redeem)
     function totalAssets() public view override returns (uint256 _assets) {
-        return totalIdle() + totalExternalAssets();
+        return _getVaultModuleStorage().virtualTotalAssets;
     }
 
     /// @inheritdoc IVaultModule
@@ -187,85 +275,43 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     }
 
     /// @inheritdoc IVaultModule
-    function totalExternalAssets() public view returns (uint256) {
-        VaultModuleStorage storage $ = _getVaultModuleStorage();
-        return $.totalExternalAssets;
-    }
-
-    /// @inheritdoc IVaultModule
     function merkleRoot() public view returns (bytes32) {
         return _getVaultModuleStorage().merkleRoot;
     }
 
     /// @inheritdoc IVaultModule
-    function currentProposal() public view returns (SettlementProposal memory) {
-        return _getVaultModuleStorage().currentProposal;
-    }
-
-    /// @inheritdoc IVaultModule
-    function cooldownPeriod() public view returns (uint256) {
-        return _getVaultModuleStorage().cooldownPeriod;
+    function paused() public view returns (bool) {
+        return _getVaultModuleStorage().paused;
     }
 
     /* //////////////////////////////////////////////////////////////
-                        CORE PROPOSAL LOGIC
+                        SETTLEMENT LOGIC
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IVaultModule
-    function proposeSettleTotalAssets(uint256 _totalExternalAssets, bytes32 _merkleRoot)
-        external
-        onlyRoles(MANAGER_ROLE)
-    {
+    function settleTotalAssets(uint256 _newTotalAssets, bytes32 _merkleRoot) external onlyRoles(MANAGER_ROLE) {
         VaultModuleStorage storage $ = _getVaultModuleStorage();
+        $.virtualTotalAssets = _newTotalAssets;
+        $.merkleRoot = _merkleRoot;
+        emit SettlementExecuted(_newTotalAssets, _merkleRoot);
+    }
 
-        // Create the new proposal
-        SettlementProposal memory _newProposal = SettlementProposal({
-            totalExternalAssets: _totalExternalAssets,
-            merkleRoot: _merkleRoot,
-            executeAfter: block.timestamp + $.cooldownPeriod
-        });
+    /* //////////////////////////////////////////////////////////////
+                        PAUSE LOGIC
+    //////////////////////////////////////////////////////////////*/
 
-        $.currentProposal = _newProposal;
-
-        // Emit event
-        emit SettlementProposed(_newProposal.totalExternalAssets, _newProposal.merkleRoot, _newProposal.executeAfter);
+    /// @inheritdoc IVaultModule
+    function pause() external onlyRoles(EMERGENCY_ADMIN_ROLE) {
+        VaultModuleStorage storage $ = _getVaultModuleStorage();
+        $.paused = true;
+        emit Paused(msg.sender);
     }
 
     /// @inheritdoc IVaultModule
-    function cancelProposal() external onlyRoles(GUARDIAN_ROLE) {
+    function unpause() external onlyRoles(EMERGENCY_ADMIN_ROLE) {
         VaultModuleStorage storage $ = _getVaultModuleStorage();
-        SettlementProposal memory _proposalToCancel = $.currentProposal;
-
-        // Proposal must exist to be cancelled
-        require(_proposalToCancel.executeAfter != 0, NO_ACTIVE_PROPOSAL);
-
-        // Emit event before deleting the proposal data
-        emit ProposalCancelled(_proposalToCancel.totalExternalAssets, _proposalToCancel.merkleRoot);
-
-        // Clear the proposal
-        delete $.currentProposal;
-    }
-
-    /// @inheritdoc IVaultModule
-    function executeProposal() external {
-        VaultModuleStorage storage $ = _getVaultModuleStorage();
-        SettlementProposal memory _proposal = $.currentProposal;
-
-        // Check if a proposal exists
-        require(_proposal.executeAfter != 0, NO_ACTIVE_PROPOSAL);
-
-        // The time must be NOW or LATER than the executeAfter timestamp (cooldown elapsed)
-        require(block.timestamp >= _proposal.executeAfter, COOLDOWN_NOT_ELAPSED);
-
-        // Update the contract's state
-        $.totalExternalAssets = _proposal.totalExternalAssets;
-        $.merkleRoot = _proposal.merkleRoot;
-
-        // Emit event
-        emit SettlementExecuted($.totalExternalAssets, $.merkleRoot);
-
-        // Clear the proposal
-        delete $.currentProposal;
+        $.paused = false;
+        emit Unpaused(msg.sender);
     }
 
     /* //////////////////////////////////////////////////////////////
@@ -273,27 +319,41 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IVaultModule
-    function validateTotalAssets(address[] calldata _strategies, uint256[] calldata _values, bytes32 _merkleRoot)
-        external
+    function computeMerkleRoot(
+        address[] calldata _strategies,
+        uint256[] calldata _values
+    )
+        public
         pure
-        returns (bool)
+        returns (bytes32)
     {
         uint256 _l = _strategies.length;
         require(_l == _values.length, MISMATCHED_ARRAYS);
 
         bytes32[] memory _leaves = new bytes32[](_l);
         for (uint256 _i; _i < _l; ++_i) {
-            // Hash the strategy address and its value to form a leaf
             _leaves[_i] = keccak256(abi.encodePacked(_strategies[_i], _values[_i]));
         }
 
-        bytes32 _root = MerkleTreeLib.root(_leaves);
-        return _root == _merkleRoot;
+        return MerkleTreeLib.root(_leaves);
+    }
+
+    /// @inheritdoc IVaultModule
+    function validateTotalAssets(
+        address[] calldata _strategies,
+        uint256[] calldata _values,
+        bytes32 _merkleRoot
+    )
+        external
+        pure
+        returns (bool)
+    {
+        return computeMerkleRoot(_strategies, _values) == _merkleRoot;
     }
 
     /// @inheritdoc IModule
     function selectors() external pure returns (bytes4[] memory _selectors) {
-        _selectors = new bytes4[](41);
+        _selectors = new bytes4[](42);
         _selectors[0] = this.DOMAIN_SEPARATOR.selector;
         _selectors[1] = this.allowance.selector;
         _selectors[2] = this.approve.selector;
@@ -318,23 +378,24 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _selectors[21] = this.transfer.selector;
         _selectors[22] = this.transferFrom.selector;
         _selectors[23] = this.withdraw.selector;
-        _selectors[24] = this.executeProposal.selector;
-        _selectors[25] = this.validateTotalAssets.selector;
-        _selectors[26] = this.cancelProposal.selector;
-        _selectors[27] = this.merkleRoot.selector;
-        _selectors[28] = this.proposeSettleTotalAssets.selector;
-        _selectors[29] = this.cooldownPeriod.selector;
-        _selectors[30] = this.currentProposal.selector;
-        _selectors[31] = this.requestDeposit.selector;
-        _selectors[32] = this.requestRedeem.selector;
-        _selectors[33] = this.totalIdle.selector;
-        _selectors[34] = this.totalExternalAssets.selector;
-        _selectors[35] = this.initializeVault.selector;
-        _selectors[36] = this.claimableDepositRequest.selector;
-        _selectors[37] = this.claimableRedeemRequest.selector;
-        _selectors[38] = this.pendingDepositRequest.selector;
-        _selectors[39] = this.pendingRedeemRequest.selector;
-        _selectors[40] = this.sharePrice.selector;
+        _selectors[24] = this.validateTotalAssets.selector;
+        _selectors[25] = this.merkleRoot.selector;
+        _selectors[26] = this.settleTotalAssets.selector;
+        _selectors[27] = this.requestDeposit.selector;
+        _selectors[28] = this.requestRedeem.selector;
+        _selectors[29] = this.totalIdle.selector;
+        _selectors[30] = this.initializeVault.selector;
+        _selectors[31] = this.claimableDepositRequest.selector;
+        _selectors[32] = this.claimableRedeemRequest.selector;
+        _selectors[33] = this.pendingDepositRequest.selector;
+        _selectors[34] = this.pendingRedeemRequest.selector;
+        _selectors[35] = this.sharePrice.selector;
+        _selectors[36] = this.paused.selector;
+        _selectors[37] = this.pause.selector;
+        _selectors[38] = this.unpause.selector;
+        _selectors[39] = bytes4(abi.encodeWithSignature("deposit(uint256,address,address)"));
+        _selectors[40] = bytes4(abi.encodeWithSignature("mint(uint256,address,address)"));
+        _selectors[41] = this.computeMerkleRoot.selector;
         return _selectors;
     }
 }
