@@ -99,7 +99,10 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _previousHook The address of the previous hook in the chain
     /// @param _data Encoded ApproveAndDepositData
     /// @return _executions Array of executions to perform
-    function buildExecutions(address _previousHook, bytes calldata _data)
+    function buildExecutions(
+        address _previousHook,
+        bytes calldata _data
+    )
         external
         view
         override
@@ -320,7 +323,12 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _asset The underlying asset address
     /// @param _assetsDeposited The amount of assets deposited
     /// @param _receiver The address that received shares
-    function storeDepositContextStatic(address _vault, address _asset, uint256 _assetsDeposited, address _receiver)
+    function storeDepositContextStatic(
+        address _vault,
+        address _asset,
+        uint256 _assetsDeposited,
+        address _receiver
+    )
         external
         onlyOwner
     {

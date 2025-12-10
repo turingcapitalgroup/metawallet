@@ -6,6 +6,7 @@ import { Execution, IRegistry, LibCall, MinimalSmartAccount } from "minimal-smar
 
 // Local Contracts
 import { HookExecution, IHookExecution } from "./HookExecution.sol";
+import { IVaultModule } from "./interfaces/IVaultModule.sol";
 import { MultiFacetProxy } from "kam/base/MultiFacetProxy.sol";
 
 /// @title MetaWallet
@@ -122,8 +123,7 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
                           AUTHORIZATION
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Authorize the sender to modify functions
-    /// @param _sender The address attempting to modify functions
+    /// @inheritdoc MultiFacetProxy
     function _authorizeModifyFunctions(address _sender) internal override {
         _checkRoles(ADMIN_ROLE);
     }

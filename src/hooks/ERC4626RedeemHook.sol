@@ -99,7 +99,10 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     /// @param _previousHook The address of the previous hook in the chain
     /// @param _data Encoded RedeemData
     /// @return _executions Array of executions to perform
-    function buildExecutions(address _previousHook, bytes calldata _data)
+    function buildExecutions(
+        address _previousHook,
+        bytes calldata _data
+    )
         external
         view
         override
