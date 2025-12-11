@@ -2,8 +2,8 @@
 pragma solidity ^0.8.20;
 
 // Test Base
-import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 import { console } from "forge-std/console.sol";
+import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 
 // External Libraries
 import { ERC1967Factory } from "solady/utils/ERC1967Factory.sol";
@@ -97,7 +97,7 @@ contract OneInchSwapHookTest is BaseTest {
     ///////////////////////////////////////////////////////////////*/
 
     function setUp() public {
-        _setUp("MAINNET", 23989931);
+        _setUp("MAINNET", 23_989_931);
         vm.stopPrank(); // Stop the automatic prank from BaseTest
 
         // Deploy registry
@@ -681,14 +681,6 @@ contract OneInchSwapHookTest is BaseTest {
     /* ///////////////////////////////////////////////////////////////
                          VIEW FUNCTION TESTS
     ///////////////////////////////////////////////////////////////*/
-
-    function test_GetHookType() public view {
-        assertEq(uint256(swapHook.getHookType()), uint256(IHook.HookType.NONACCOUNTING));
-    }
-
-    function test_GetHookSubtype() public view {
-        assertEq(swapHook.getHookSubtype(), keccak256("OneInch.Swap"));
-    }
 
     function test_UsePreviousHookOutputConstant() public view {
         assertEq(swapHook.USE_PREVIOUS_HOOK_OUTPUT(), type(uint256).max);

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import { Ownable } from "solady/auth/Ownable.sol";
+import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 // Local Interfaces
 import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
@@ -28,12 +29,11 @@ import {
 ///      Stores execution context that can be read by subsequent hooks in the chain
 ///      Supports dynamic amounts by reading from previous hook's output
 contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
+    using SafeTransferLib for address;
+
     /* ///////////////////////////////////////////////////////////////
                               CONSTANTS
     ///////////////////////////////////////////////////////////////*/
-
-    /// @notice Unique identifier for this hook type
-    bytes32 public constant HOOK_SUBTYPE = keccak256("ERC4626.ApproveAndDeposit");
 
     /// @notice Special value indicating amount should be read from previous hook
     uint256 public constant USE_PREVIOUS_HOOK_OUTPUT = type(uint256).max;
@@ -124,10 +124,11 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
 
         if (_useDynamicAmount) {
             // Amount will be read from previous hook at execution time
+            // NOTE: Tokens should already be at this hook, sent by the previous hook
             require(_previousHook != address(0), HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND);
 
             // Build execution array with dynamic amount resolution
-            // [getDynamicAmount, approve, deposit, storeContext, (optional) validate]
+            // [getDynamicAmount, approveVault, deposit, storeContext, (optional) validate]
             uint256 _execCount = _depositData.minShares > 0 ? 5 : 4;
             _executions = new Execution[](_execCount);
 
@@ -140,7 +141,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            // Execution 1: Approve vault to spend assets (amount will be resolved at runtime)
+            // Execution 1: Approve vault to spend assets using safeApproveWithRetry
             _executions[1] = Execution({
                 target: address(this),
                 value: 0,
@@ -178,26 +179,37 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
             // Static amount provided
             require(_depositData.assets > 0, HOOK4626DEPOSIT_INVALID_HOOK_DATA);
 
-            // Build execution array: [approve, deposit, storeContext, (optional) validate]
-            uint256 _execCount = _depositData.minShares > 0 ? 4 : 3;
+            // Build execution array: [transfer, approve, deposit, storeContext, (optional) validate]
+            uint256 _execCount = _depositData.minShares > 0 ? 5 : 4;
             _executions = new Execution[](_execCount);
 
-            // Execution 0: Approve vault to spend assets
+            // Execution 0: Transfer assets from metawallet to hook
             _executions[0] = Execution({
                 target: _asset,
                 value: 0,
-                callData: abi.encodeWithSelector(IERC20.approve.selector, _depositData.vault, _depositData.assets)
+                callData: abi.encodeWithSelector(IERC20.transfer.selector, address(this), _depositData.assets)
             });
 
-            // Execution 1: Deposit assets into vault
+            // Execution 1: Approve vault to spend assets using safeApproveWithRetry
             _executions[1] = Execution({
-                target: _depositData.vault,
+                target: address(this),
                 value: 0,
-                callData: abi.encodeWithSelector(IERC4626.deposit.selector, _depositData.assets, _depositData.receiver)
+                callData: abi.encodeWithSelector(
+                    this.approveForDepositStatic.selector, _asset, _depositData.vault, _depositData.assets
+                )
             });
 
-            // Execution 2: Store context for next hook
+            // Execution 2: Deposit assets into vault (hook deposits on behalf of receiver)
             _executions[2] = Execution({
+                target: address(this),
+                value: 0,
+                callData: abi.encodeWithSelector(
+                    this.executeDepositStatic.selector, _depositData.vault, _depositData.assets, _depositData.receiver
+                )
+            });
+
+            // Execution 3: Store context for next hook
+            _executions[3] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
@@ -209,9 +221,9 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            // Execution 3 (optional): Validate minimum shares received
+            // Execution 4 (optional): Validate minimum shares received
             if (_depositData.minShares > 0) {
-                _executions[3] = Execution({
+                _executions[4] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(
@@ -236,18 +248,6 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
 
         // Clean up context data after execution completes
         delete _depositContext;
-    }
-
-    /// @inheritdoc IHook
-    /// @return _hookType The type of hook (INFLOW)
-    function getHookType() external pure override returns (HookType _hookType) {
-        return HookType.INFLOW;
-    }
-
-    /// @inheritdoc IHook
-    /// @return _subtype The subtype identifier for this hook
-    function getHookSubtype() external pure override returns (bytes32 _subtype) {
-        return HOOK_SUBTYPE;
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -289,7 +289,15 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _vault The vault address
     function approveForDeposit(address _vault) external onlyOwner {
         DepositContext memory _ctx = _depositContext;
-        IERC20(_ctx.asset).approve(_vault, _ctx.assetsDeposited);
+        _ctx.asset.safeApproveWithRetry(_vault, _ctx.assetsDeposited);
+    }
+
+    /// @notice Approve the vault to spend assets (for static amount flow)
+    /// @param _asset The asset address to approve
+    /// @param _vault The vault address (spender)
+    /// @param _amount The amount to approve
+    function approveForDepositStatic(address _asset, address _vault, uint256 _amount) external onlyOwner {
+        _asset.safeApproveWithRetry(_vault, _amount);
     }
 
     /// @notice Execute the deposit (for dynamic amount flow)
@@ -298,6 +306,14 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
         DepositContext storage _ctx = _depositContext;
         IERC4626(_ctx.vault).deposit(_ctx.assetsDeposited, _receiver);
         _ctx.receiver = _receiver;
+    }
+
+    /// @notice Execute the deposit (for static amount flow)
+    /// @param _vault The vault address
+    /// @param _assets The amount of assets to deposit
+    /// @param _receiver The address to receive the shares
+    function executeDepositStatic(address _vault, uint256 _assets, address _receiver) external onlyOwner {
+        IERC4626(_vault).deposit(_assets, _receiver);
     }
 
     /* ///////////////////////////////////////////////////////////////

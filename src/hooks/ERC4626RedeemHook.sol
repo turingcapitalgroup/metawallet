@@ -30,9 +30,6 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
                               CONSTANTS
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Unique identifier for this hook type
-    bytes32 public constant HOOK_SUBTYPE = keccak256("ERC4626.Redeem");
-
     /// @notice Special value indicating amount should be read from previous hook
     uint256 public constant USE_PREVIOUS_HOOK_OUTPUT = type(uint256).max;
 
@@ -227,18 +224,6 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
 
         // Clean up context data after execution completes
         delete _redeemContext;
-    }
-
-    /// @inheritdoc IHook
-    /// @return _hookType The type of hook (OUTFLOW)
-    function getHookType() external pure override returns (HookType _hookType) {
-        return HookType.OUTFLOW;
-    }
-
-    /// @inheritdoc IHook
-    /// @return _subtype The subtype identifier for this hook
-    function getHookSubtype() external pure override returns (bytes32 _subtype) {
-        return HOOK_SUBTYPE;
     }
 
     /* ///////////////////////////////////////////////////////////////

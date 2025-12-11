@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import { Ownable } from "solady/auth/Ownable.sol";
+import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 // Local Interfaces
 import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
@@ -29,12 +30,11 @@ import {
 ///      Stores execution context that can be read by subsequent hooks in the chain
 ///      Supports dynamic amounts by reading from previous hook's output
 contract OneInchSwapHook is IHook, IHookResult, Ownable {
+    using SafeTransferLib for address;
+
     /* ///////////////////////////////////////////////////////////////
                               CONSTANTS
     ///////////////////////////////////////////////////////////////*/
-
-    /// @notice Unique identifier for this hook type
-    bytes32 public constant HOOK_SUBTYPE = keccak256("OneInch.Swap");
 
     /// @notice Special value indicating amount should be read from previous hook
     uint256 public constant USE_PREVIOUS_HOOK_OUTPUT = type(uint256).max;
@@ -198,11 +198,9 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
             uint256 _execCount = _swapData.minAmountOut > 0 ? _baseExecCount + 1 : _baseExecCount;
             _executions = new Execution[](_execCount);
 
-            uint256 _execIndex = 0;
-
             // Execution: Approve router to spend source tokens (skip for native ETH)
             if (!_isNativeEth) {
-                _executions[_execIndex++] = Execution({
+                _executions[0] = Execution({
                     target: _swapData.srcToken,
                     value: 0,
                     callData: abi.encodeWithSelector(IERC20.approve.selector, _swapData.router, _swapData.amountIn)
@@ -210,11 +208,11 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
             }
 
             // Execution: Execute the swap via 1inch router
-            _executions[_execIndex++] =
+            _executions[1] =
                 Execution({ target: _swapData.router, value: _swapData.value, callData: _swapData.swapCalldata });
 
             // Execution: Store context for next hook
-            _executions[_execIndex++] = Execution({
+            _executions[2] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
@@ -228,7 +226,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
 
             // Execution (optional): Validate minimum output received
             if (_swapData.minAmountOut > 0) {
-                _executions[_execIndex] = Execution({
+                _executions[3] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(
@@ -250,18 +248,6 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
 
         // Clean up context data after execution completes
         delete _swapContext;
-    }
-
-    /// @inheritdoc IHook
-    /// @return _hookType The type of hook (NONACCOUNTING - swaps don't change total balance)
-    function getHookType() external pure override returns (HookType _hookType) {
-        return HookType.NONACCOUNTING;
-    }
-
-    /// @inheritdoc IHook
-    /// @return _subtype The subtype identifier for this hook
-    function getHookSubtype() external pure override returns (bytes32 _subtype) {
-        return HOOK_SUBTYPE;
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -372,7 +358,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     /// @param _router The 1inch router address
     function approveForSwap(address _router) external onlyOwner {
         SwapContext memory _ctx = _swapContext;
-        IERC20(_ctx.srcToken).approve(_router, _ctx.amountIn);
+        (_ctx.srcToken).safeApproveWithRetry(_router, _ctx.amountIn);
     }
 
     /// @notice Execute the swap (for dynamic amount flow)
