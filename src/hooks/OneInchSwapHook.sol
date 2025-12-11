@@ -198,9 +198,11 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
             uint256 _execCount = _swapData.minAmountOut > 0 ? _baseExecCount + 1 : _baseExecCount;
             _executions = new Execution[](_execCount);
 
+            uint256 _idx = 0;
+
             // Execution: Approve router to spend source tokens (skip for native ETH)
             if (!_isNativeEth) {
-                _executions[0] = Execution({
+                _executions[_idx++] = Execution({
                     target: _swapData.srcToken,
                     value: 0,
                     callData: abi.encodeWithSelector(IERC20.approve.selector, _swapData.router, _swapData.amountIn)
@@ -208,11 +210,11 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
             }
 
             // Execution: Execute the swap via 1inch router
-            _executions[1] =
+            _executions[_idx++] =
                 Execution({ target: _swapData.router, value: _swapData.value, callData: _swapData.swapCalldata });
 
             // Execution: Store context for next hook
-            _executions[2] = Execution({
+            _executions[_idx++] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
@@ -226,7 +228,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
 
             // Execution (optional): Validate minimum output received
             if (_swapData.minAmountOut > 0) {
-                _executions[3] = Execution({
+                _executions[_idx] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(
