@@ -111,7 +111,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @dev Override deposit to add whenNotPaused
     function deposit(uint256 assets, address receiver) public override whenNotPaused returns (uint256 shares) {
-        shares = this.deposit(assets, receiver, msg.sender);
+        shares = VaultModule.deposit(assets, receiver, msg.sender);
     }
 
     /// @dev Override deposit with controller to update virtualTotalAssets
@@ -132,7 +132,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @dev Override mint to add whenNotPaused
     function mint(uint256 shares, address receiver) public override whenNotPaused returns (uint256 assets) {
-        assets = this.mint(shares, receiver, msg.sender);
+        assets = VaultModule.mint(shares, receiver, msg.sender);
     }
 
     /// @dev Override mint with controller to update virtualTotalAssets
