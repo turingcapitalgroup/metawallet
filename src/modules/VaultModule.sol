@@ -134,9 +134,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @dev Override mint to add whenNotPaused
     function mint(uint256 shares, address receiver) public override whenNotPaused returns (uint256 assets) {
-        assets = super.mint(shares, receiver);
-        // Increase virtual total assets when shares are minted
-        _getVaultModuleStorage().virtualTotalAssets += assets;
+        return mint(shares, receiver, msg.sender);
     }
 
     /// @dev Override mint with controller to update virtualTotalAssets

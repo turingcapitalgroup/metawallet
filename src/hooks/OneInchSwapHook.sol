@@ -39,6 +39,9 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     /// @notice Special value indicating amount should be read from previous hook
     uint256 public constant USE_PREVIOUS_HOOK_OUTPUT = type(uint256).max;
 
+    /// @notice Native ETH sentinel address used by 1inch
+    address public constant NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     /* ///////////////////////////////////////////////////////////////
                               STRUCTURES
     ///////////////////////////////////////////////////////////////*/
@@ -80,6 +83,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     /// @param amountIn The amount of source tokens to swap (use USE_PREVIOUS_HOOK_OUTPUT for dynamic)
     /// @param minAmountOut Minimum amount of destination tokens expected (slippage protection)
     /// @param receiver The address that will receive the swapped tokens
+    /// @param value The ETH value to send with the swap (for ETH-involved swaps)
     /// @param swapCalldata The pre-built calldata for the 1inch router swap function
     struct SwapData {
         address router;
@@ -88,6 +92,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         uint256 amountIn;
         uint256 minAmountOut;
         address receiver;
+        uint256 value;
         bytes swapCalldata;
     }
 
@@ -145,6 +150,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                     _swapData.router,
                     _swapData.srcToken,
                     _swapData.dstToken,
+                    _swapData.value,
                     _swapData.swapCalldata
                 )
             });
@@ -184,22 +190,31 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
             // Static amount provided
             require(_swapData.amountIn > 0, HOOKONEINCH_INVALID_HOOK_DATA);
 
-            // Build execution array: [approve, swap, storeContext, (optional) validate]
-            uint256 _execCount = _swapData.minAmountOut > 0 ? 4 : 3;
+            // Check if swapping native ETH (no approval needed)
+            bool _isNativeEth = _swapData.srcToken == NATIVE_ETH;
+
+            // Build execution array: [approve (if not ETH), swap, storeContext, (optional) validate]
+            uint256 _baseExecCount = _isNativeEth ? 2 : 3;
+            uint256 _execCount = _swapData.minAmountOut > 0 ? _baseExecCount + 1 : _baseExecCount;
             _executions = new Execution[](_execCount);
 
-            // Execution 0: Approve router to spend source tokens
-            _executions[0] = Execution({
-                target: _swapData.srcToken,
-                value: 0,
-                callData: abi.encodeWithSelector(IERC20.approve.selector, _swapData.router, _swapData.amountIn)
-            });
+            uint256 _execIndex = 0;
 
-            // Execution 1: Execute the swap via 1inch router
-            _executions[1] = Execution({ target: _swapData.router, value: 0, callData: _swapData.swapCalldata });
+            // Execution: Approve router to spend source tokens (skip for native ETH)
+            if (!_isNativeEth) {
+                _executions[_execIndex++] = Execution({
+                    target: _swapData.srcToken,
+                    value: 0,
+                    callData: abi.encodeWithSelector(IERC20.approve.selector, _swapData.router, _swapData.amountIn)
+                });
+            }
 
-            // Execution 2: Store context for next hook
-            _executions[2] = Execution({
+            // Execution: Execute the swap via 1inch router
+            _executions[_execIndex++] =
+                Execution({ target: _swapData.router, value: _swapData.value, callData: _swapData.swapCalldata });
+
+            // Execution: Store context for next hook
+            _executions[_execIndex++] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
@@ -211,9 +226,9 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            // Execution 3 (optional): Validate minimum output received
+            // Execution (optional): Validate minimum output received
             if (_swapData.minAmountOut > 0) {
-                _executions[3] = Execution({
+                _executions[_execIndex] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(
@@ -269,12 +284,14 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     /// @param _router The 1inch router address (stored for later use)
     /// @param _srcToken The source token address (stored for later use)
     /// @param _dstToken The destination token address (stored for later use)
+    /// @param _value The ETH value to send with the swap (stored for later use)
     /// @param _swapCalldata The swap calldata (stored for later use)
     function resolveDynamicAmount(
         address _previousHook,
         address _router,
         address _srcToken,
         address _dstToken,
+        uint256 _value,
         bytes calldata _swapCalldata
     )
         external
@@ -295,10 +312,12 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         });
 
         // Store additional data needed for execution
-        // We store router and calldata in transient-like storage pattern
+        // We store router, value and calldata in transient-like storage pattern
         assembly {
             // Store router at slot keccak256("OneInchSwapHook.router")
             sstore(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef, _router)
+            // Store value at slot keccak256("OneInchSwapHook.value")
+            sstore(0x4234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef, _value)
         }
 
         // Store swap calldata length and data
@@ -362,10 +381,12 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     function executeSwap(address _receiver) external onlyOwner {
         SwapContext storage _ctx = _swapContext;
 
-        // Load router address
+        // Load router address and value
         address _router;
+        uint256 _value;
         assembly {
             _router := sload(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef)
+            _value := sload(0x4234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef)
         }
 
         // Transfer tokens from hook to router (tokens were sent here by previous hook)
@@ -377,7 +398,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         bytes memory _calldata = _loadSwapCalldata();
 
         // Execute the swap - this will pull tokens from this hook via transferFrom
-        (bool success,) = _router.call(_calldata);
+        (bool success,) = _router.call{ value: _value }(_calldata);
         require(success, HOOKONEINCH_INVALID_HOOK_DATA);
 
         // Update receiver in context

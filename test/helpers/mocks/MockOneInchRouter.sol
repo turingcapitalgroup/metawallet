@@ -8,6 +8,13 @@ import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
 /// @dev Implements a simple swap function that transfers tokens at a configurable rate
 contract MockOneInchRouter {
     /* ///////////////////////////////////////////////////////////////
+                              CONSTANTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Native ETH sentinel address used by 1inch
+    address public constant NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+    /* ///////////////////////////////////////////////////////////////
                               STORAGE
     ///////////////////////////////////////////////////////////////*/
 
@@ -53,16 +60,24 @@ contract MockOneInchRouter {
         address receiver
     )
         external
+        payable
         returns (uint256 returnAmount)
     {
-        // If amount is 0, use the sender's entire balance of srcToken
         uint256 actualAmount = amount;
-        if (actualAmount == 0) {
-            actualAmount = IERC20(srcToken).balanceOf(msg.sender);
-        }
 
-        // Transfer source tokens from sender
-        IERC20(srcToken).transferFrom(msg.sender, address(this), actualAmount);
+        // Handle native ETH as source token
+        if (srcToken == NATIVE_ETH) {
+            // Use msg.value as the amount for native ETH
+            actualAmount = msg.value;
+            require(actualAmount > 0, "No ETH sent");
+        } else {
+            // If amount is 0, use the sender's entire balance of srcToken
+            if (actualAmount == 0) {
+                actualAmount = IERC20(srcToken).balanceOf(msg.sender);
+            }
+            // Transfer source tokens from sender
+            IERC20(srcToken).transferFrom(msg.sender, address(this), actualAmount);
+        }
 
         // Calculate output amount based on exchange rate
         returnAmount = (actualAmount * exchangeRate * decimalAdjustment) / 1e18;
