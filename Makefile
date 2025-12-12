@@ -78,7 +78,8 @@ deploy-localhost:
 		--broadcast \
 		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
-		--slow
+		--slow \
+		-vvvv
 	@$(MAKE) format-output
 
 # Sepolia deployment (uses keystore for production security)
@@ -212,9 +213,9 @@ format-output:
 	@for file in deployments/output/*/*.json; do \
 		if [ -f "$$file" ]; then \
 			echo "Formatting $$file"; \
-			jq . "$$file" > "$$file.tmp" && mv "$$file.tmp" "$$file"; \
+			jq . "$$file" > "$$file.tmp" 2>/dev/null && mv "$$file.tmp" "$$file" || true; \
 		fi; \
-	done
+	done || true
 	@echo "JSON files formatted!"
 
 # Predict proxy address (single chain using network config)

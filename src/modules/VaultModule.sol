@@ -55,12 +55,11 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     }
 
     /* //////////////////////////////////////////////////////////////
-                          MODIFIERS
+                          INTERNAL CHECKS
     //////////////////////////////////////////////////////////////*/
 
-    modifier whenNotPaused() {
+    function _checkNotPaused() internal view {
         require(!_getVaultModuleStorage().paused, VAULT_PAUSED);
-        _;
     }
 
     /// @inheritdoc IVaultModule
@@ -100,54 +99,40 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     )
         public
         override
-        whenNotPaused
         returns (uint256 requestId)
     {
+        _checkNotPaused();
         if (owner != msg.sender) revert InvalidOperator();
         requestId = super.requestDeposit(assets, controller, owner);
         // fulfill the request directly
         _fulfillDepositRequest(controller, assets, convertToShares(assets));
     }
 
-    /// @dev Override deposit to add whenNotPaused
-    function deposit(uint256 assets, address receiver) public override whenNotPaused returns (uint256 shares) {
+    /// @dev Override deposit to add pause check
+    function deposit(uint256 assets, address receiver) public override returns (uint256 shares) {
+        _checkNotPaused();
         shares = super.deposit(assets, receiver, msg.sender);
         // Increase virtual total assets when shares are minted
         _getVaultModuleStorage().virtualTotalAssets += assets;
     }
 
     /// @dev Override deposit with controller to update virtualTotalAssets
-    function deposit(
-        uint256 assets,
-        address receiver,
-        address controller
-    )
-        public
-        override
-        whenNotPaused
-        returns (uint256 shares)
-    {
+    function deposit(uint256 assets, address receiver, address controller) public override returns (uint256 shares) {
+        _checkNotPaused();
         shares = super.deposit(assets, receiver, controller);
         // Increase virtual total assets when shares are minted
         _getVaultModuleStorage().virtualTotalAssets += assets;
     }
 
-    /// @dev Override mint to add whenNotPaused
-    function mint(uint256 shares, address receiver) public override whenNotPaused returns (uint256 assets) {
+    /// @dev Override mint to add pause check
+    function mint(uint256 shares, address receiver) public override returns (uint256 assets) {
+        _checkNotPaused();
         return mint(shares, receiver, msg.sender);
     }
 
     /// @dev Override mint with controller to update virtualTotalAssets
-    function mint(
-        uint256 shares,
-        address receiver,
-        address controller
-    )
-        public
-        override
-        whenNotPaused
-        returns (uint256 assets)
-    {
+    function mint(uint256 shares, address receiver, address controller) public override returns (uint256 assets) {
+        _checkNotPaused();
         assets = super.mint(shares, receiver, controller);
         // Increase virtual total assets when shares are minted
         _getVaultModuleStorage().virtualTotalAssets += assets;
@@ -175,17 +160,8 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @param to Address to receive the assets
     /// @param controller Controller of the redemption request
     /// @return assets Amount of assets returned
-    function redeem(
-        uint256 shares,
-        address to,
-        address controller
-    )
-        public
-        virtual
-        override
-        whenNotPaused
-        returns (uint256 assets)
-    {
+    function redeem(uint256 shares, address to, address controller) public virtual override returns (uint256 assets) {
+        _checkNotPaused();
         if (shares > maxRedeem(controller)) revert RedeemMoreThanMax();
         assets = convertToAssets(shares);
         _fulfillRedeemRequest(shares, assets, controller, true);
@@ -201,17 +177,8 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @param to Address to receive the assets
     /// @param controller Controller of the redemption request
     /// @return shares Amount of shares burned
-    function withdraw(
-        uint256 assets,
-        address to,
-        address controller
-    )
-        public
-        virtual
-        override
-        whenNotPaused
-        returns (uint256 shares)
-    {
+    function withdraw(uint256 assets, address to, address controller) public virtual override returns (uint256 shares) {
+        _checkNotPaused();
         if (assets > maxWithdraw(controller)) revert WithdrawMoreThanMax();
         shares = convertToAssets(assets);
         _fulfillRedeemRequest(shares, assets, controller, true);

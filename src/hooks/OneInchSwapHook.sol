@@ -26,7 +26,6 @@ import {
 ///      1. Approves the 1inch router to spend the input token
 ///      2. Executes the swap via the 1inch router using pre-built calldata
 ///      3. Validates minimum output amount (slippage protection)
-///      This is a NONACCOUNTING hook as it swaps between assets
 ///      Stores execution context that can be read by subsequent hooks in the chain
 ///      Supports dynamic amounts by reading from previous hook's output
 contract OneInchSwapHook is IHook, IHookResult, Ownable {
