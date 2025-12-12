@@ -20,10 +20,11 @@ help:
 	@echo "  make deploy-sepolia     - Deploy to Sepolia testnet"
 	@echo ""
 	@echo "Individual steps:"
-	@echo "  make deploy-impl-*      - Deploy implementation + VaultModule only"
-	@echo "  make deploy-proxy-*     - Deploy proxy (requires impl deployed)"
-	@echo "  make deploy-hooks-*     - Deploy hooks (requires proxy deployed)"
-	@echo "  make install-hooks-*    - Install hooks on existing MetaWallet"
+	@echo "  make deploy-mocks-*     - Deploy mock assets only (00)"
+	@echo "  make deploy-impl-*      - Deploy implementation + VaultModule only (01)"
+	@echo "  make deploy-proxy-*     - Deploy proxy (requires impl deployed) (02)"
+	@echo "  make deploy-hooks-*     - Deploy hooks (requires proxy deployed) (03)"
+	@echo "  make install-hooks-*    - Install hooks on existing MetaWallet (04)"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make verify             - Verify deployment files exist"
@@ -56,23 +57,23 @@ deploy-mainnet:
 # Validate mainnet config before deployment
 validate-config:
 	@echo "Validating mainnet.json configuration..."
-	@forge script script/Deploy.s.sol:ValidateMultiChainConfig -vvvv
+	@forge script script/helpers/PredictAddress.s.sol:ValidateMainnetConfigScript -vvvv
 
 # Predict mainnet proxy address
 predict-mainnet:
 	@echo "Predicting mainnet proxy address..."
-	@forge script script/Deploy.s.sol:PredictMultiChainAddress \
+	@forge script script/helpers/PredictAddress.s.sol:PredictMainnetAddressScript \
 		--rpc-url $${RPC_MAINNET} \
 		-vvvv
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SINGLE CHAIN DEPLOYMENTS
+# SINGLE CHAIN DEPLOYMENTS (ALL-IN-ONE)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Localhost deployment (uses anvil default private key - no secrets needed)
 deploy-localhost:
 	@echo "Deploying to LOCALHOST..."
-	@forge script script/Deploy.s.sol:DeployAll \
+	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
 		--rpc-url http://localhost:8545 \
 		--broadcast \
 		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
@@ -83,7 +84,7 @@ deploy-localhost:
 # Sepolia deployment (uses keystore for production security)
 deploy-sepolia:
 	@echo "Deploying to SEPOLIA..."
-	@forge script script/Deploy.s.sol:DeployAll \
+	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
 		--rpc-url $${RPC_SEPOLIA} \
 		--broadcast \
 		--account keyDeployer \
@@ -94,79 +95,107 @@ deploy-sepolia:
 	@$(MAKE) format-output
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP-BY-STEP DEPLOYMENT (for single chains)
+# STEP-BY-STEP DEPLOYMENT - LOCALHOST
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Implementation only
+# 00 - Deploy mock assets
+deploy-mocks-localhost:
+	@echo "[00] Deploying mock assets to LOCALHOST..."
+	@forge script script/deployment/00_DeployMockAssets.s.sol:DeployMockAssetsScript \
+		--rpc-url http://localhost:8545 \
+		--broadcast \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		--slow
+
+# 01 - Deploy implementation
 deploy-impl-localhost:
-	@echo "Deploying implementation to LOCALHOST..."
-	@forge script script/Deploy.s.sol:Deploy \
+	@echo "[01] Deploying implementation to LOCALHOST..."
+	@forge script script/deployment/01_DeployImplementation.s.sol:DeployImplementationScript \
 		--rpc-url http://localhost:8545 \
 		--broadcast \
 		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 		--slow
 
-deploy-impl-sepolia:
-	@echo "Deploying implementation to SEPOLIA..."
-	@forge script script/Deploy.s.sol:Deploy \
-		--rpc-url $${RPC_SEPOLIA} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow
-
-# Proxy only (requires implementation deployed)
+# 02 - Deploy proxy
 deploy-proxy-localhost:
-	@echo "Deploying proxy to LOCALHOST..."
-	@forge script script/Deploy.s.sol:DeployProxy \
+	@echo "[02] Deploying proxy to LOCALHOST..."
+	@forge script script/deployment/02_DeployProxy.s.sol:DeployProxyScript \
 		--rpc-url http://localhost:8545 \
 		--broadcast \
 		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 		--slow
 
-deploy-proxy-sepolia:
-	@echo "Deploying proxy to SEPOLIA..."
-	@forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url $${RPC_SEPOLIA} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow
-
-# Hooks only (requires proxy deployed)
+# 03 - Deploy hooks
 deploy-hooks-localhost:
-	@echo "Deploying hooks to LOCALHOST..."
-	@forge script script/Deploy.s.sol:DeployHooks \
+	@echo "[03] Deploying hooks to LOCALHOST..."
+	@forge script script/deployment/03_DeployHooks.s.sol:DeployHooksScript \
 		--rpc-url http://localhost:8545 \
 		--broadcast \
 		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 		--slow
 
-deploy-hooks-sepolia:
-	@echo "Deploying hooks to SEPOLIA..."
-	@forge script script/Deploy.s.sol:DeployHooks \
+# 04 - Install hooks
+install-hooks-localhost:
+	@echo "[04] Installing hooks on LOCALHOST..."
+	@forge script script/deployment/04_InstallHooks.s.sol:InstallHooksScript \
+		--rpc-url http://localhost:8545 \
+		--broadcast \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		--slow
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP-BY-STEP DEPLOYMENT - SEPOLIA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# 00 - Deploy mock assets
+deploy-mocks-sepolia:
+	@echo "[00] Deploying mock assets to SEPOLIA..."
+	@forge script script/deployment/00_DeployMockAssets.s.sol:DeployMockAssetsScript \
 		--rpc-url $${RPC_SEPOLIA} \
 		--broadcast \
 		--account keyDeployer \
 		--sender $${DEPLOYER_ADDRESS} \
 		--slow
 
-# Install hooks on existing MetaWallet
-install-hooks-localhost:
-	@echo "Installing hooks on LOCALHOST..."
-	@forge script script/Deploy.s.sol:InstallHooks \
-		--rpc-url http://localhost:8545 \
+# 01 - Deploy implementation
+deploy-impl-sepolia:
+	@echo "[01] Deploying implementation to SEPOLIA..."
+	@forge script script/deployment/01_DeployImplementation.s.sol:DeployImplementationScript \
+		--rpc-url $${RPC_SEPOLIA} \
 		--broadcast \
-		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
 		--slow
 
+# 02 - Deploy proxy
+deploy-proxy-sepolia:
+	@echo "[02] Deploying proxy to SEPOLIA..."
+	@forge script script/deployment/02_DeployProxy.s.sol:DeployProxyScript \
+		--rpc-url $${RPC_SEPOLIA} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+# 03 - Deploy hooks
+deploy-hooks-sepolia:
+	@echo "[03] Deploying hooks to SEPOLIA..."
+	@forge script script/deployment/03_DeployHooks.s.sol:DeployHooksScript \
+		--rpc-url $${RPC_SEPOLIA} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+# 04 - Install hooks
 install-hooks-sepolia:
-	@echo "Installing hooks on SEPOLIA..."
-	@forge script script/Deploy.s.sol:InstallHooks \
+	@echo "[04] Installing hooks on SEPOLIA..."
+	@forge script script/deployment/04_InstallHooks.s.sol:InstallHooksScript \
 		--rpc-url $${RPC_SEPOLIA} \
 		--broadcast \
 		--account keyDeployer \
@@ -190,7 +219,7 @@ format-output:
 
 # Predict proxy address (single chain using network config)
 predict-address:
-	@forge script script/Deploy.s.sol:PredictProxyAddress -vvvv
+	@forge script script/helpers/PredictAddress.s.sol:PredictProxyAddressScript -vvvv
 
 # Verification
 verify:

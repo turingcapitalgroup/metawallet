@@ -39,7 +39,7 @@ echo ""
 
 # Validate config first
 echo -e "${BLUE}Validating configuration...${NC}"
-forge script script/Deploy.s.sol:ValidateMultiChainConfig -vvvv 2>/dev/null || {
+forge script script/helpers/PredictAddress.s.sol:ValidateMainnetConfigScript -vvvv 2>/dev/null || {
     echo -e "${RED}Configuration validation failed!${NC}"
     exit 1
 }
@@ -51,7 +51,7 @@ echo -e "${BLUE}Predicting proxy address...${NC}"
 FIRST_CHAIN_RPC=$(jq -r '.chains[0].rpcEnvVar' $CONFIG_FILE)
 FIRST_RPC_URL=$(eval echo \$$FIRST_CHAIN_RPC)
 if [ -n "$FIRST_RPC_URL" ]; then
-    forge script script/Deploy.s.sol:PredictMultiChainAddress --rpc-url $FIRST_RPC_URL -vvvv 2>/dev/null || true
+    forge script script/helpers/PredictAddress.s.sol:PredictMainnetAddressScript --rpc-url $FIRST_RPC_URL -vvvv 2>/dev/null || true
 fi
 echo ""
 
@@ -102,7 +102,7 @@ for ((i=0; i<$CHAIN_COUNT; i++)); do
     mkdir -p "deployments/output/$CHAIN_NAME"
 
     # Build deploy command
-    DEPLOY_CMD="forge script script/Deploy.s.sol:DeployMultiChain \
+    DEPLOY_CMD="forge script script/deployment/06_DeployMainnet.s.sol:DeployMainnetScript \
         --rpc-url $RPC_URL \
         --broadcast \
         --account keyDeployer \

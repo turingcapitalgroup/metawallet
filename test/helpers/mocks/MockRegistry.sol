@@ -39,7 +39,11 @@ contract MockRegistry is IRegistry {
     }
 
     /// @inheritdoc IRegistry
-    function isAdapterSelectorAllowed(address adapter, address target, bytes4 selector)
+    function isAdapterSelectorAllowed(
+        address adapter,
+        address target,
+        bytes4 selector
+    )
         external
         view
         override

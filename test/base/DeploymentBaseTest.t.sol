@@ -5,10 +5,10 @@ import { BaseTest } from "./BaseTest.t.sol";
 
 // Protocol contracts
 import { MetaWallet } from "metawallet/src/MetaWallet.sol";
-import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 import { ERC4626ApproveAndDepositHook } from "metawallet/src/hooks/ERC4626ApproveAndDepositHook.sol";
 import { ERC4626RedeemHook } from "metawallet/src/hooks/ERC4626RedeemHook.sol";
 import { OneInchSwapHook } from "metawallet/src/hooks/OneInchSwapHook.sol";
+import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
 // External dependencies
 import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
@@ -126,7 +126,8 @@ contract DeploymentBaseTest is BaseTest {
         vaultModule = new VaultModule();
 
         // Step 3: Deploy proxy via factory
-        bytes32 fullSalt = bytes32(uint256(uint160(address(users.owner))) << 96) | (salt & bytes32(uint256(type(uint96).max)));
+        bytes32 fullSalt =
+            bytes32(uint256(uint160(address(users.owner))) << 96) | (salt & bytes32(uint256(type(uint96).max)));
 
         address predictedAddress = factory.predictDeterministicAddress(fullSalt);
 
