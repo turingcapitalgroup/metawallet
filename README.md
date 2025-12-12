@@ -25,7 +25,7 @@ MetaWallet enables institutional fund managers to operate a vault that accepts u
                     ┌────────────┴────────────┐
                     ▼                         ▼
               VaultModule                   Hooks
-         (ERC7540 + accounting)     (ERC4626Deposit, Redeem)
+         (ERC7540 + accounting)     (ERC4626, 1inch Swap)
 ```
 
 ### Core Components
@@ -37,6 +37,7 @@ MetaWallet enables institutional fund managers to operate a vault that accepts u
 | `HookExecution.sol` | Multi-hook execution system for strategy operations |
 | `ERC4626ApproveAndDepositHook.sol` | Hook for investing into ERC-4626 vaults |
 | `ERC4626RedeemHook.sol` | Hook for divesting from ERC-4626 vaults |
+| `OneInchSwapHook.sol` | Hook for token swaps via 1inch Aggregation Router |
 
 ## Accounting Model
 
@@ -110,6 +111,35 @@ hooks[0] = IHookExecution.HookExecution({
 
 metaWallet.executeWithHookExecution(hooks);
 ```
+
+### Swapping Tokens via 1inch
+
+```solidity
+OneInchSwapHook.SwapData memory swapData = OneInchSwapHook.SwapData({
+    router: ONEINCH_ROUTER,
+    srcToken: USDC,
+    dstToken: WETH,
+    amountIn: 1000e6,
+    minAmountOut: 0.5 ether,  // Slippage protection
+    receiver: address(metaWallet),
+    value: 0,  // ETH value for native swaps
+    swapCalldata: oneInchCalldata  // Pre-built 1inch API calldata
+});
+
+IHookExecution.HookExecution[] memory hooks = new IHookExecution.HookExecution[](1);
+hooks[0] = IHookExecution.HookExecution({
+    hookId: keccak256("hook.oneinch.swap"),
+    data: abi.encode(swapData)
+});
+
+metaWallet.executeWithHookExecution(hooks);
+```
+
+The swap hook supports:
+- **Static amounts**: Fixed input amount specified in `amountIn`
+- **Dynamic amounts**: Use `USE_PREVIOUS_HOOK_OUTPUT` to chain with previous hooks
+- **Native ETH swaps**: Set `srcToken` to `0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE` and `value` to the ETH amount
+- **Slippage protection**: Set `minAmountOut` to enforce minimum output
 
 ### Settling After Yield
 
