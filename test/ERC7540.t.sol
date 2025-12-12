@@ -89,9 +89,9 @@ contract ERC7540Test is BaseTest, ERC7540Events, ERC4626Events {
         assertEq(USDC_MAINNET.balanceOf(address(metaWallet)), amount);
         assertEq(metaWallet.claimableDepositRequest(users.alice), 0);
         assertEq(metaWallet.pendingDepositRequest(users.alice), 0);
-        assertEq(metaWallet.totalAssets(), amount);
-        assertEq(assets, amount);
-        assertEq(metaWallet.balanceOf(users.alice), assets);
+        assertEq(metaWallet.totalAssets(), amount, "1");
+        assertEq(assets, amount, "2");
+        assertEq(metaWallet.balanceOf(users.alice), assets, "3");
     }
 
     function test_revert_erc7540_mint_noRequest() public {

@@ -6,17 +6,11 @@ interface IVaultModule {
                             EVENTS
     //////////////////////////////////////////////////////////////*/
 
-    event SettlementProposed(uint256 indexed newTotalAssets, bytes32 indexed newMerkleRoot, uint256 executeAfter);
-
-    event ProposalCancelled(uint256 totalAssets, bytes32 merkleRoot);
-
     event SettlementExecuted(uint256 indexed totalAssets, bytes32 indexed merkleRoot);
 
-    struct SettlementProposal {
-        uint256 totalExternalAssets;
-        bytes32 merkleRoot;
-        uint256 executeAfter;
-    }
+    event Paused(address indexed account);
+
+    event Unpaused(address indexed account);
 
     /// @notice Initializes the vault logic with asset and token metadata
     /// @param _asset The address of the underlying asset
@@ -28,43 +22,51 @@ interface IVaultModule {
     /// @return The price of one vault share in asset terms
     function sharePrice() external view returns (uint256);
 
-    /// @notice Returns the current total external assets recorded for the vault
-    /// @return The total external assets
-    function totalExternalAssets() external view returns (uint256);
-
-    /// @notice Returns the current total idle assets recorded for the vault
+    /// @notice Returns the current total idle assets (actual balance in vault)
     function totalIdle() external view returns (uint256);
 
     /// @notice Returns the current Merkle Root of strategy assets
     /// @return The Merkle root hash
     function merkleRoot() external view returns (bytes32);
 
-    /// @notice Returns the current active settlement proposal
-    /// @return The full settlement proposal struct, including total assets, Merkle root, and execution time
-    function currentProposal() external view returns (SettlementProposal memory);
+    /// @notice Returns whether the vault is paused
+    /// @return True if paused, false otherwise
+    function paused() external view returns (bool);
 
-    /// @notice Returns the required cooldown period between proposal and execution
-    /// @return The cooldown period in seconds
-    function cooldownPeriod() external view returns (uint256);
+    /// @notice Directly settles the total assets and merkle root
+    /// @param _newTotalAssets The new total asset amount to be set
+    /// @param _merkleRoot The Merkle root of the strategy holdings
+    function settleTotalAssets(uint256 _newTotalAssets, bytes32 _merkleRoot) external;
 
-    /// @notice Proposes a new settlement state (total assets and Merkle root)
-    /// @param _totalExternalAssets The new external total asset amount to be set
-    /// @param _merkleRoot The Merkle root of the new strategy holdings
-    function proposeSettleTotalAssets(uint256 _totalExternalAssets, bytes32 _merkleRoot) external;
+    /// @notice Pauses the vault - only EMERGENCY_ADMIN can call
+    function pause() external;
 
-    /// @notice Allows a GUARDIAN to cancel the current settlement proposal
-    function cancelProposal() external;
+    /// @notice Unpauses the vault - only EMERGENCY_ADMIN can call
+    function unpause() external;
 
-    /// @notice Executes the current settlement proposal after the cooldown period
-    function executeProposal() external;
+    /// @notice Computes the Merkle root from strategy holdings
+    /// @param _strategies Array of strategy addresses
+    /// @param _values Array of strategy values (holdings)
+    /// @return The computed Merkle root
+    function computeMerkleRoot(
+        address[] calldata _strategies,
+        uint256[] calldata _values
+    )
+        external
+        pure
+        returns (bytes32);
 
     /// @notice Validates a set of strategy holdings against a Merkle root
     /// @param _strategies Array of strategy addresses
     /// @param _values Array of strategy values (holdings)
     /// @param _merkleRoot The Merkle root to validate against
     /// @return Whether the provided leaves correctly derive the given Merkle root
-    function validateTotalAssets(address[] calldata _strategies, uint256[] calldata _values, bytes32 _merkleRoot)
+    function validateTotalAssets(
+        address[] calldata _strategies,
+        uint256[] calldata _values,
+        bytes32 _merkleRoot
+    )
         external
-        view
+        pure
         returns (bool);
 }

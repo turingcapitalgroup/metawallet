@@ -170,7 +170,10 @@ abstract contract HookExecution is IHookExecution {
     /// @param _executions Array of executions to perform
     /// @param _hookExecutions Array of hook execution metadata
     /// @return _results Results from each execution
-    function _processHookChain(Execution[] memory _executions, HookExecution[] calldata _hookExecutions)
+    function _processHookChain(
+        Execution[] memory _executions,
+        HookExecution[] calldata _hookExecutions
+    )
         internal
         returns (bytes[] memory _results)
     {
