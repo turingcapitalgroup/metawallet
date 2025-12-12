@@ -46,9 +46,13 @@ contract DeployAllScript is Script, DeploymentManager {
         deployed.factory = config.external_.factory;
         deployed.registry = config.external_.registry;
 
-        // For testnets: check if mock assets already exist in output JSON first
+        // For testnets: check if mock assets already exist in output JSON AND on-chain
         if (config.deployment.deployMockAssets) {
-            if (existing.contracts.mockAsset != address(0)) {
+            if (
+                existing.contracts.mockAsset != address(0) && existing.contracts.mockFactory != address(0)
+                    && existing.contracts.mockRegistry != address(0) && existing.contracts.mockAsset.code.length > 0
+                    && existing.contracts.mockFactory.code.length > 0 && existing.contracts.mockRegistry.code.length > 0
+            ) {
                 // Use existing mock assets from previous deployment
                 deployed.asset = existing.contracts.mockAsset;
                 deployed.factory = existing.contracts.mockFactory;
@@ -58,7 +62,7 @@ contract DeployAllScript is Script, DeploymentManager {
                 console.log("Mock Factory:", deployed.factory);
                 console.log("Mock Registry:", deployed.registry);
             } else {
-                // Deploy new mock assets
+                // Deploy new mock assets (JSON is stale or contracts don't exist on-chain)
                 _deployMocks(deployed, config.roles.owner);
             }
         }
