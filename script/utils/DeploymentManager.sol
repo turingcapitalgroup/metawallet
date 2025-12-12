@@ -38,12 +38,34 @@ abstract contract DeploymentManager is Script {
     struct VaultConfig {
         string name;
         string symbol;
+        string namePrefix;
+        string symbolPrefix;
         string accountId;
     }
 
     struct DeploymentSettings {
         bytes32 salt;
         bool deployMockAssets;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MULTI-CHAIN CONFIGURATION STRUCTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    struct MultiChainConfig {
+        DeploymentSettings deployment;
+        ChainConfig[] chains;
+        RoleAddresses roles;
+        ExternalAddresses external_;
+        VaultConfig vault;
+    }
+
+    struct ChainConfig {
+        string name;
+        uint256 chainId;
+        string rpcEnvVar;
+        string etherscanApiKeyEnvVar;
+        bool verify;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -67,6 +89,23 @@ abstract contract DeploymentManager is Script {
         address mockAsset;
         address mockFactory;
         address mockRegistry;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MULTI-CHAIN OUTPUT
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    struct MultiChainDeploymentOutput {
+        bytes32 salt;
+        address expectedProxyAddress;
+        ChainDeployment[] deployments;
+    }
+
+    struct ChainDeployment {
+        string name;
+        uint256 chainId;
+        bool deployed;
+        ContractAddresses contracts;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -124,6 +163,67 @@ abstract contract DeploymentManager is Script {
         return config;
     }
 
+    /// @notice Reads multi-chain mainnet configuration from JSON
+    /// @return config The parsed multi-chain configuration
+    function readMainnetConfig() internal view returns (MultiChainConfig memory config) {
+        string memory configPath = "deployments/config/mainnet.json";
+        require(vm.exists(configPath), "Mainnet config not found");
+
+        string memory json = vm.readFile(configPath);
+
+        // Parse deployment settings
+        config.deployment.salt = json.readBytes32(".deployment.salt");
+        config.deployment.deployMockAssets = json.readBool(".deployment.deployMockAssets");
+
+        // Parse role addresses
+        config.roles.owner = json.readAddress(".roles.owner");
+        config.roles.deployer = json.readAddress(".roles.deployer");
+
+        // Parse external addresses
+        config.external_.factory = json.readAddress(".external.factory");
+        config.external_.registry = json.readAddress(".external.registry");
+        config.external_.asset = json.readAddress(".external.asset");
+
+        // Parse vault config - use prefixes for production (name/symbol derived from asset)
+        config.vault.namePrefix = json.readString(".vault.namePrefix");
+        config.vault.symbolPrefix = json.readString(".vault.symbolPrefix");
+        config.vault.accountId = json.readString(".vault.accountId");
+
+        // Parse chains array - we need to do this manually since stdJson doesn't support arrays well
+        // The chains will be parsed by the shell script and passed as environment variables
+        return config;
+    }
+
+    /// @notice Gets chain count from mainnet config
+    /// @return count Number of chains configured
+    function getChainCount() internal view returns (uint256 count) {
+        string memory configPath = "deployments/config/mainnet.json";
+        string memory json = vm.readFile(configPath);
+        // Parse the chains array length using raw JSON parsing
+        bytes memory chainsRaw = json.parseRaw(".chains");
+        // Decode as array of bytes to get length
+        bytes[] memory chains = abi.decode(chainsRaw, (bytes[]));
+        return chains.length;
+    }
+
+    /// @notice Gets a specific chain config by index
+    /// @param index The chain index
+    /// @return chain The chain configuration
+    function getChainConfig(uint256 index) internal view returns (ChainConfig memory chain) {
+        string memory configPath = "deployments/config/mainnet.json";
+        string memory json = vm.readFile(configPath);
+
+        string memory prefix = string.concat(".chains[", vm.toString(index), "]");
+
+        chain.name = json.readString(string.concat(prefix, ".name"));
+        chain.chainId = json.readUint(string.concat(prefix, ".chainId"));
+        chain.rpcEnvVar = json.readString(string.concat(prefix, ".rpcEnvVar"));
+        chain.etherscanApiKeyEnvVar = json.readString(string.concat(prefix, ".etherscanApiKeyEnvVar"));
+        chain.verify = json.readBool(string.concat(prefix, ".verify"));
+
+        return chain;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // OUTPUT READING
     // ═══════════════════════════════════════════════════════════════════════════
@@ -173,6 +273,22 @@ abstract contract DeploymentManager is Script {
         if (_keyExists(json, ".contracts.mockRegistry")) {
             output.contracts.mockRegistry = json.readAddress(".contracts.mockRegistry");
         }
+
+        return output;
+    }
+
+    /// @notice Reads multi-chain deployment output
+    /// @return output The parsed multi-chain deployment output
+    function readMultiChainOutput() internal view returns (MultiChainDeploymentOutput memory output) {
+        string memory outputPath = "deployments/output/multichain/addresses.json";
+
+        if (!vm.exists(outputPath)) {
+            return output;
+        }
+
+        string memory json = vm.readFile(outputPath);
+        output.salt = json.readBytes32(".salt");
+        output.expectedProxyAddress = json.readAddress(".expectedProxyAddress");
 
         return output;
     }
@@ -275,6 +391,18 @@ abstract contract DeploymentManager is Script {
         require(existing.contracts.vaultModule != address(0), "VaultModule not deployed");
     }
 
+    /// @notice Validates production config for multi-chain deployment
+    /// @param config The multi-chain configuration
+    function validateProductionConfig(MultiChainConfig memory config) internal pure {
+        require(config.roles.owner != address(0), "Missing owner address");
+        require(config.roles.deployer != address(0), "Missing deployer address");
+        require(config.external_.factory != address(0), "Missing factory address");
+        require(config.external_.registry != address(0), "Missing registry address");
+        require(config.external_.asset != address(0), "Missing asset address");
+        require(bytes(config.vault.name).length > 0, "Missing vault name");
+        require(bytes(config.vault.symbol).length > 0, "Missing vault symbol");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // LOGGING
     // ═══════════════════════════════════════════════════════════════════════════
@@ -308,5 +436,20 @@ abstract contract DeploymentManager is Script {
         console.log("Redeem Hook:", output.contracts.redeemHook);
         console.log("1inch Swap Hook:", output.contracts.oneInchSwapHook);
         console.log("==========================");
+    }
+
+    /// @notice Logs multi-chain configuration
+    /// @param config The multi-chain configuration
+    function logMultiChainConfig(MultiChainConfig memory config) internal pure {
+        console.log("=== MULTI-CHAIN DEPLOYMENT CONFIG ===");
+        console.log("Owner:", config.roles.owner);
+        console.log("Deployer:", config.roles.deployer);
+        console.log("Factory:", config.external_.factory);
+        console.log("Registry:", config.external_.registry);
+        console.log("Asset:", config.external_.asset);
+        console.log("Vault Name:", config.vault.name);
+        console.log("Vault Symbol:", config.vault.symbol);
+        console.log("Salt:", vm.toString(config.deployment.salt));
+        console.log("=====================================");
     }
 }

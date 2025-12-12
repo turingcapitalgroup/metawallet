@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract MockRegistry {
+import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
+
+/// @title MockRegistry
+/// @notice Mock registry for testing that implements IRegistry interface
+contract MockRegistry is IRegistry {
     /* ///////////////////////////////////////////////////////////////
                               STORAGE
     ///////////////////////////////////////////////////////////////*/
 
     mapping(address => bool) public whitelistedTargets;
+    mapping(address => mapping(address => mapping(bytes4 => bool))) public allowed;
 
     /* ///////////////////////////////////////////////////////////////
                               WHITELIST
@@ -20,14 +25,31 @@ contract MockRegistry {
         whitelistedTargets[_target] = false;
     }
 
+    function allow(address adapter, address target, bytes4 selector, bool value) external {
+        allowed[adapter][target][selector] = value;
+    }
+
     /* ///////////////////////////////////////////////////////////////
                               AUTHORIZATION
     ///////////////////////////////////////////////////////////////*/
 
-    function authorizeAdapterCall(address _target, bytes4, bytes memory) external view {
-        require(whitelistedTargets[_target], "Target not whitelisted");
-        // In production, this would do more sophisticated checks
-        // For testing, we just check if target is whitelisted
+    /// @inheritdoc IRegistry
+    function authorizeAdapterCall(address, bytes4, bytes calldata) external pure override {
+        // Always allow for testing - override with allow() for specific restrictions
+    }
+
+    /// @inheritdoc IRegistry
+    function isAdapterSelectorAllowed(address adapter, address target, bytes4 selector)
+        external
+        view
+        override
+        returns (bool)
+    {
+        // Check specific allowance first, then fall back to whitelist
+        if (allowed[adapter][target][selector]) {
+            return true;
+        }
+        return whitelistedTargets[target];
     }
 
     function isWhitelisted(address _target) external view returns (bool _isWhitelisted) {

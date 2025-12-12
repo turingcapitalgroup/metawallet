@@ -371,3 +371,246 @@ contract PredictProxyAddress is Script, DeploymentManager {
         console.log("Predicted proxy address:", predictedAddress);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MULTI-CHAIN DEPLOYMENT SCRIPTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// @title DeployMultiChain
+/// @notice Deploys MetaWallet to the current chain using production.json config
+/// @dev This script is called by the shell script for each chain in sequence
+///      All chains get the same proxy address via CREATE2
+contract DeployMultiChain is Script, DeploymentManager {
+    struct DeployedContracts {
+        address asset;
+        address factory;
+        address registry;
+        address implementation;
+        address vaultModule;
+        address proxy;
+        address depositHook;
+        address redeemHook;
+        address oneInchSwapHook;
+        string vaultName;
+        string vaultSymbol;
+    }
+
+    function run() external {
+        // Read production configuration
+        MultiChainConfig memory config = readMainnetConfig();
+        logMultiChainConfig(config);
+
+        // Validate config
+        validateProductionConfig(config);
+
+        vm.startBroadcast();
+
+        DeployedContracts memory deployed;
+        deployed.asset = config.external_.asset;
+        deployed.factory = config.external_.factory;
+        deployed.registry = config.external_.registry;
+
+        // Derive vault name and symbol from asset
+        (deployed.vaultName, deployed.vaultSymbol) = _deriveVaultNameAndSymbol(deployed.asset, config);
+
+        // Deploy core contracts
+        _deployCore(deployed);
+
+        // Deploy proxy with deterministic address
+        _deployProxy(deployed, config);
+
+        // Setup VaultModule and hooks
+        _setupVaultAndHooks(deployed, config);
+
+        vm.stopBroadcast();
+
+        // Print summary
+        _printSummary(deployed, config);
+    }
+
+    function _deriveVaultNameAndSymbol(
+        address asset,
+        MultiChainConfig memory config
+    ) internal view returns (string memory name, string memory symbol) {
+        // Get asset name and symbol
+        string memory assetName;
+        string memory assetSymbol;
+
+        try ERC20(asset).name() returns (string memory n) {
+            assetName = n;
+        } catch {
+            assetName = "Unknown";
+        }
+
+        try ERC20(asset).symbol() returns (string memory s) {
+            assetSymbol = s;
+        } catch {
+            assetSymbol = "???";
+        }
+
+        // Derive vault name: "{namePrefix} {assetName}" e.g. "MetaVault USDC"
+        name = string.concat(config.vault.namePrefix, " ", assetName);
+
+        // Derive vault symbol: "{symbolPrefix}{assetSymbol}" e.g. "mvUSDC"
+        symbol = string.concat(config.vault.symbolPrefix, assetSymbol);
+
+        return (name, symbol);
+    }
+
+    function _deployCore(DeployedContracts memory deployed) internal {
+        deployed.implementation = address(new MetaWallet());
+        writeContractAddress("implementation", deployed.implementation);
+        console.log("[1/6] MetaWallet implementation:", deployed.implementation);
+
+        deployed.vaultModule = address(new VaultModule());
+        writeContractAddress("vaultModule", deployed.vaultModule);
+        console.log("[2/6] VaultModule:", deployed.vaultModule);
+    }
+
+    function _deployProxy(DeployedContracts memory deployed, MultiChainConfig memory config) internal {
+        // Salt format: [20 bytes caller address][12 bytes custom salt]
+        // This ensures the same address across all chains when using the same deployer + salt
+        bytes32 fullSalt = bytes32(uint256(uint160(msg.sender)) << 96) | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
+
+        MinimalSmartAccountFactory factoryContract = MinimalSmartAccountFactory(deployed.factory);
+        address predictedAddress = factoryContract.predictDeterministicAddress(fullSalt);
+        console.log("Predicted proxy address:", predictedAddress);
+
+        string memory accountId = config.vault.accountId;
+        deployed.proxy = factoryContract.deployDeterministic(
+            deployed.implementation, msg.sender, fullSalt, config.roles.owner, IRegistry(deployed.registry), accountId
+        );
+        writeContractAddress("proxy", deployed.proxy);
+        console.log("[3/6] Proxy deployed:", deployed.proxy);
+
+        require(deployed.proxy == predictedAddress, "Address mismatch!");
+    }
+
+    function _setupVaultAndHooks(DeployedContracts memory deployed, MultiChainConfig memory config) internal {
+        MetaWallet metaWallet = MetaWallet(payable(deployed.proxy));
+
+        // Grant ADMIN_ROLE to deployer
+        metaWallet.grantRoles(msg.sender, 1); // ADMIN_ROLE = 1
+        console.log("ADMIN_ROLE granted to deployer");
+
+        // Setup VaultModule with derived name/symbol
+        bytes4[] memory vaultSelectors = VaultModule(deployed.vaultModule).selectors();
+        metaWallet.addFunctions(vaultSelectors, deployed.vaultModule, false);
+        VaultModule(deployed.proxy).initializeVault(deployed.asset, deployed.vaultName, deployed.vaultSymbol);
+        console.log("[4/6] VaultModule initialized");
+        console.log("  Vault Name:", deployed.vaultName);
+        console.log("  Vault Symbol:", deployed.vaultSymbol);
+
+        // Deploy and install ERC4626 hooks
+        deployed.depositHook = address(new ERC4626ApproveAndDepositHook(deployed.proxy));
+        deployed.redeemHook = address(new ERC4626RedeemHook(deployed.proxy));
+        writeContractAddress("depositHook", deployed.depositHook);
+        writeContractAddress("redeemHook", deployed.redeemHook);
+
+        metaWallet.installHook(keccak256("hook.erc4626.deposit"), deployed.depositHook);
+        metaWallet.installHook(keccak256("hook.erc4626.redeem"), deployed.redeemHook);
+        console.log("[5/6] ERC4626 hooks deployed and installed");
+
+        // Deploy 1inch swap hook
+        deployed.oneInchSwapHook = address(new OneInchSwapHook(deployed.proxy));
+        writeContractAddress("oneInchSwapHook", deployed.oneInchSwapHook);
+        metaWallet.installHook(keccak256("hook.1inch.swap"), deployed.oneInchSwapHook);
+        console.log("[6/6] 1inch swap hook deployed and installed");
+    }
+
+    function _printSummary(DeployedContracts memory deployed, MultiChainConfig memory) internal view {
+        console.log("\n========================================");
+        console.log("  DEPLOYMENT COMPLETE ON CHAIN:", block.chainid);
+        console.log("========================================");
+        console.log("Implementation:  ", deployed.implementation);
+        console.log("VaultModule:     ", deployed.vaultModule);
+        console.log("Proxy:           ", deployed.proxy);
+        console.log("Deposit Hook:    ", deployed.depositHook);
+        console.log("Redeem Hook:     ", deployed.redeemHook);
+        console.log("1inch Swap Hook: ", deployed.oneInchSwapHook);
+        console.log("----------------------------------------");
+        console.log("Vault Name:      ", deployed.vaultName);
+        console.log("Vault Symbol:    ", deployed.vaultSymbol);
+        console.log("Asset:           ", deployed.asset);
+        console.log("========================================");
+    }
+}
+
+/// @title PredictMultiChainAddress
+/// @notice Predicts the MetaWallet proxy address for multi-chain deployment
+/// @dev Uses production.json config to predict the same address across all chains
+contract PredictMultiChainAddress is Script, DeploymentManager {
+    function run() external view {
+        MultiChainConfig memory config = readMainnetConfig();
+
+        // Salt format: [20 bytes caller address][12 bytes custom salt]
+        bytes32 fullSalt = bytes32(uint256(uint160(config.roles.deployer)) << 96) | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
+
+        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(config.external_.factory);
+        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+
+        console.log("=== MULTI-CHAIN ADDRESS PREDICTION ===");
+        console.log("Factory:", config.external_.factory);
+        console.log("Deployer:", config.roles.deployer);
+        console.log("Salt:", vm.toString(config.deployment.salt));
+        console.log("Full Salt:", vm.toString(fullSalt));
+        console.log("");
+        console.log("PREDICTED PROXY ADDRESS:", predictedAddress);
+        console.log("");
+        console.log("This address will be the same on all chains");
+        console.log("configured in production.json");
+        console.log("=======================================");
+    }
+}
+
+/// @title ValidateMultiChainConfig
+/// @notice Validates the production.json configuration before deployment
+contract ValidateMultiChainConfig is Script, DeploymentManager {
+    function run() external view {
+        MultiChainConfig memory config = readMainnetConfig();
+        uint256 chainCount = getChainCount();
+
+        console.log("=== PRODUCTION CONFIG VALIDATION ===");
+        console.log("");
+        console.log("Deployment Settings:");
+        console.log("  Salt:", vm.toString(config.deployment.salt));
+        console.log("  Deploy Mock Assets:", config.deployment.deployMockAssets);
+        console.log("");
+        console.log("Roles:");
+        console.log("  Owner:", config.roles.owner);
+        console.log("  Deployer:", config.roles.deployer);
+        console.log("");
+        console.log("External Contracts:");
+        console.log("  Factory:", config.external_.factory);
+        console.log("  Registry:", config.external_.registry);
+        console.log("  Asset:", config.external_.asset);
+        console.log("");
+        console.log("Vault Config:");
+        console.log("  Name:", config.vault.name);
+        console.log("  Symbol:", config.vault.symbol);
+        console.log("  Account ID:", config.vault.accountId);
+        console.log("");
+        console.log("Chains to deploy (", chainCount, "):");
+
+        for (uint256 i = 0; i < chainCount; i++) {
+            ChainConfig memory chain = getChainConfig(i);
+            console.log("  [", i + 1, "]", chain.name);
+            console.log("      Chain ID:", chain.chainId);
+            console.log("      RPC Env:", chain.rpcEnvVar);
+            console.log("      Verify:", chain.verify);
+        }
+
+        console.log("");
+        console.log("====================================");
+
+        // Validate
+        require(config.roles.owner != address(0), "Owner address not set");
+        require(config.roles.deployer != address(0), "Deployer address not set");
+        require(config.external_.factory != address(0), "Factory address not set");
+        require(config.external_.registry != address(0), "Registry address not set");
+        require(config.external_.asset != address(0), "Asset address not set");
+        require(chainCount > 0, "No chains configured");
+
+        console.log("CONFIG VALIDATION: PASSED");
+    }
+}

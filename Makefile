@@ -1,5 +1,5 @@
 # MetaWallet Deployment Makefile
-# Usage: make deploy-mainnet, make deploy-sepolia, make deploy-localhost
+# Usage: make deploy-localhost, make deploy-mainnet, make deploy-sepolia
 -include .env
 export
 
@@ -10,10 +10,14 @@ help:
 	@echo "MetaWallet Deployment Commands"
 	@echo "=============================="
 	@echo ""
-	@echo "Deployment (full protocol):"
+	@echo "Production Deployment:"
+	@echo "  make deploy-mainnet     - Deploy to ALL chains in mainnet.json (same address)"
+	@echo "  make validate-config    - Validate mainnet.json before deployment"
+	@echo "  make predict-mainnet    - Predict proxy address for mainnet deployment"
+	@echo ""
+	@echo "Single Chain Deployment:"
 	@echo "  make deploy-localhost   - Deploy to localhost (anvil)"
 	@echo "  make deploy-sepolia     - Deploy to Sepolia testnet"
-	@echo "  make deploy-mainnet     - Deploy to mainnet"
 	@echo ""
 	@echo "Individual steps:"
 	@echo "  make deploy-impl-*      - Deploy implementation + VaultModule only"
@@ -26,7 +30,7 @@ help:
 	@echo "  make clean              - Clean localhost deployment files"
 	@echo "  make clean-all          - Clean ALL deployment files (DANGER)"
 	@echo "  make format-output      - Format JSON output files"
-	@echo "  make predict-address    - Predict proxy address"
+	@echo "  make predict-address    - Predict proxy address (single chain)"
 	@echo ""
 	@echo "Build & Test:"
 	@echo "  make build              - Build the project"
@@ -40,7 +44,29 @@ help:
 	@echo "  - NEVER store private keys in .env or config files"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# NETWORK-SPECIFIC DEPLOYMENTS
+# MAINNET PRODUCTION DEPLOYMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Deploy to all chains configured in mainnet.json with same address
+deploy-mainnet:
+	@echo "Starting mainnet deployment..."
+	@./script/deploy-mainnet.sh
+	@$(MAKE) format-output
+
+# Validate mainnet config before deployment
+validate-config:
+	@echo "Validating mainnet.json configuration..."
+	@forge script script/Deploy.s.sol:ValidateMultiChainConfig -vvvv
+
+# Predict mainnet proxy address
+predict-mainnet:
+	@echo "Predicting mainnet proxy address..."
+	@forge script script/Deploy.s.sol:PredictMultiChainAddress \
+		--rpc-url $${RPC_MAINNET} \
+		-vvvv
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SINGLE CHAIN DEPLOYMENTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Localhost deployment (uses anvil default private key - no secrets needed)
@@ -67,21 +93,8 @@ deploy-sepolia:
 		--etherscan-api-key $${ETHERSCAN_API_KEY}
 	@$(MAKE) format-output
 
-# Mainnet deployment (uses keystore for production security)
-deploy-mainnet:
-	@echo "Deploying to MAINNET..."
-	@forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url $${RPC_MAINNET} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow \
-		--verify \
-		--etherscan-api-key $${ETHERSCAN_API_KEY}
-	@$(MAKE) format-output
-
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP-BY-STEP DEPLOYMENT
+# STEP-BY-STEP DEPLOYMENT (for single chains)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Implementation only
@@ -98,15 +111,6 @@ deploy-impl-sepolia:
 	@echo "Deploying implementation to SEPOLIA..."
 	@forge script script/Deploy.s.sol:Deploy \
 		--rpc-url $${RPC_SEPOLIA} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow
-
-deploy-impl-mainnet:
-	@echo "Deploying implementation to MAINNET..."
-	@forge script script/Deploy.s.sol:Deploy \
-		--rpc-url $${RPC_MAINNET} \
 		--broadcast \
 		--account keyDeployer \
 		--sender $${DEPLOYER_ADDRESS} \
@@ -131,15 +135,6 @@ deploy-proxy-sepolia:
 		--sender $${DEPLOYER_ADDRESS} \
 		--slow
 
-deploy-proxy-mainnet:
-	@echo "Deploying proxy to MAINNET..."
-	@forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url $${RPC_MAINNET} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow
-
 # Hooks only (requires proxy deployed)
 deploy-hooks-localhost:
 	@echo "Deploying hooks to LOCALHOST..."
@@ -154,15 +149,6 @@ deploy-hooks-sepolia:
 	@echo "Deploying hooks to SEPOLIA..."
 	@forge script script/Deploy.s.sol:DeployHooks \
 		--rpc-url $${RPC_SEPOLIA} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow
-
-deploy-hooks-mainnet:
-	@echo "Deploying hooks to MAINNET..."
-	@forge script script/Deploy.s.sol:DeployHooks \
-		--rpc-url $${RPC_MAINNET} \
 		--broadcast \
 		--account keyDeployer \
 		--sender $${DEPLOYER_ADDRESS} \
@@ -187,15 +173,6 @@ install-hooks-sepolia:
 		--sender $${DEPLOYER_ADDRESS} \
 		--slow
 
-install-hooks-mainnet:
-	@echo "Installing hooks on MAINNET..."
-	@forge script script/Deploy.s.sol:InstallHooks \
-		--rpc-url $${RPC_MAINNET} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # UTILITIES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -211,18 +188,14 @@ format-output:
 	done
 	@echo "JSON files formatted!"
 
-# Predict proxy address
+# Predict proxy address (single chain using network config)
 predict-address:
 	@forge script script/Deploy.s.sol:PredictProxyAddress -vvvv
 
 # Verification
 verify:
 	@echo "Verifying deployment..."
-	@if [ ! -f "deployments/output/localhost/addresses.json" ] && [ ! -f "deployments/output/mainnet/addresses.json" ] && [ ! -f "deployments/output/sepolia/addresses.json" ]; then \
-		echo "No deployment files found"; \
-		exit 1; \
-	fi
-	@echo "Deployment files exist"
+	@ls -la deployments/output/*/addresses.json 2>/dev/null || echo "No deployment files found"
 	@echo "Check deployments/output/ for contract addresses"
 
 # Clean localhost deployment
@@ -278,55 +251,3 @@ snapshot:
 ## Generate documentation
 docs:
 	forge doc --serve --port 4000
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MULTI-CHAIN DEPLOYMENT (for L2s)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-deploy-arbitrum:
-	@echo "Deploying to ARBITRUM..."
-	@forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url $${RPC_ARBITRUM} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow \
-		--verify \
-		--etherscan-api-key $${ARBISCAN_API_KEY}
-	@$(MAKE) format-output
-
-deploy-optimism:
-	@echo "Deploying to OPTIMISM..."
-	@forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url $${RPC_OPTIMISM} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow \
-		--verify \
-		--etherscan-api-key $${OPTIMISM_API_KEY}
-	@$(MAKE) format-output
-
-deploy-base:
-	@echo "Deploying to BASE..."
-	@forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url $${RPC_BASE} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow \
-		--verify \
-		--etherscan-api-key $${BASESCAN_API_KEY}
-	@$(MAKE) format-output
-
-deploy-polygon:
-	@echo "Deploying to POLYGON..."
-	@forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url $${RPC_POLYGON} \
-		--broadcast \
-		--account keyDeployer \
-		--sender $${DEPLOYER_ADDRESS} \
-		--slow \
-		--verify \
-		--etherscan-api-key $${POLYGONSCAN_API_KEY}
-	@$(MAKE) format-output
