@@ -72,6 +72,11 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     /// @notice Stores swap context data for chaining
     SwapContext private _swapContext;
 
+    /// @notice Temporary storage for dynamic swap execution
+    address private _tempRouter;
+    uint256 private _tempValue;
+    bytes private _tempSwapCalldata;
+
     /* ///////////////////////////////////////////////////////////////
                          HOOK DATA STRUCTURE
     ///////////////////////////////////////////////////////////////*/
@@ -250,6 +255,9 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
 
         // Clean up context data after execution completes
         delete _swapContext;
+        delete _tempRouter;
+        delete _tempValue;
+        delete _tempSwapCalldata;
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -300,60 +308,9 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         });
 
         // Store additional data needed for execution
-        // We store router, value and calldata in transient-like storage pattern
-        assembly {
-            // Store router at slot keccak256("OneInchSwapHook.router")
-            sstore(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef, _router)
-            // Store value at slot keccak256("OneInchSwapHook.value")
-            sstore(0x4234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef, _value)
-        }
-
-        // Store swap calldata length and data
-        _storeSwapCalldata(_swapCalldata);
-    }
-
-    /// @notice Store swap calldata for later execution
-    /// @param _calldata The swap calldata to store
-    function _storeSwapCalldata(bytes calldata _calldata) internal {
-        assembly {
-            // Store calldata length at slot keccak256("OneInchSwapHook.calldataLen")
-            let lenSlot := 0x2234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-            sstore(lenSlot, _calldata.length)
-
-            // Store calldata in subsequent slots
-            let dataSlot := 0x3234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-            let words := div(add(_calldata.length, 31), 32)
-
-            for { let i := 0 } lt(i, words) { i := add(i, 1) } {
-                let offset := mul(i, 32)
-                let data := calldataload(add(_calldata.offset, offset))
-                sstore(add(dataSlot, i), data)
-            }
-        }
-    }
-
-    /// @notice Load stored swap calldata
-    /// @return _calldata The stored swap calldata
-    function _loadSwapCalldata() internal view returns (bytes memory _calldata) {
-        assembly {
-            // Load calldata length
-            let lenSlot := 0x2234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-            let len := sload(lenSlot)
-
-            // Allocate memory for the calldata
-            _calldata := mload(0x40)
-            mstore(_calldata, len)
-            mstore(0x40, add(add(_calldata, 0x20), len))
-
-            // Load calldata from storage
-            let dataSlot := 0x3234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-            let words := div(add(len, 31), 32)
-
-            for { let i := 0 } lt(i, words) { i := add(i, 1) } {
-                let data := sload(add(dataSlot, i))
-                mstore(add(add(_calldata, 0x20), mul(i, 32)), data)
-            }
-        }
+        _tempRouter = _router;
+        _tempValue = _value;
+        _tempSwapCalldata = _swapCalldata;
     }
 
     /// @notice Approve the router to spend source tokens (for dynamic amount flow)
@@ -369,21 +326,15 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     function executeSwap(address _receiver) external onlyOwner {
         SwapContext storage _ctx = _swapContext;
 
-        // Load router address and value
-        address _router;
-        uint256 _value;
-        assembly {
-            _router := sload(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef)
-            _value := sload(0x4234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef)
-        }
+        // Load router address, value and calldata from storage
+        address _router = _tempRouter;
+        uint256 _value = _tempValue;
+        bytes memory _calldata = _tempSwapCalldata;
 
         // Transfer tokens from hook to router (tokens were sent here by previous hook)
         // Then call the router with pre-built calldata
         // Note: For dynamic amounts, the swap calldata should use type(uint256).max
         // and the router will use the approved amount
-
-        // Load swap calldata
-        bytes memory _calldata = _loadSwapCalldata();
 
         // Execute the swap - this will pull tokens from this hook via transferFrom
         (bool success,) = _router.call{ value: _value }(_calldata);

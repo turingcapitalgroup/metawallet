@@ -1,16 +1,243 @@
-# MetaWallet - Makefile
-# Multi-chain deployment automation
-
+# MetaWallet Deployment Makefile
+# Usage: make deploy-mainnet, make deploy-sepolia, make deploy-localhost
 -include .env
+export
 
-.PHONY: all build test clean deploy-all help
+.PHONY: help deploy-mainnet deploy-sepolia deploy-localhost deploy-all verify clean clean-all format-output
 
 # Default target
-all: build test
+help:
+	@echo "MetaWallet Deployment Commands"
+	@echo "=============================="
+	@echo ""
+	@echo "Deployment (full protocol):"
+	@echo "  make deploy-localhost   - Deploy to localhost (anvil)"
+	@echo "  make deploy-sepolia     - Deploy to Sepolia testnet"
+	@echo "  make deploy-mainnet     - Deploy to mainnet"
+	@echo ""
+	@echo "Individual steps:"
+	@echo "  make deploy-impl-*      - Deploy implementation + VaultModule only"
+	@echo "  make deploy-proxy-*     - Deploy proxy (requires impl deployed)"
+	@echo "  make deploy-hooks-*     - Deploy hooks (requires proxy deployed)"
+	@echo "  make install-hooks-*    - Install hooks on existing MetaWallet"
+	@echo ""
+	@echo "Utilities:"
+	@echo "  make verify             - Verify deployment files exist"
+	@echo "  make clean              - Clean localhost deployment files"
+	@echo "  make clean-all          - Clean ALL deployment files (DANGER)"
+	@echo "  make format-output      - Format JSON output files"
+	@echo "  make predict-address    - Predict proxy address"
+	@echo ""
+	@echo "Build & Test:"
+	@echo "  make build              - Build the project"
+	@echo "  make test               - Run tests"
+	@echo "  make coverage           - Run coverage"
+	@echo "  make fmt                - Format code"
+	@echo ""
+	@echo "Security:"
+	@echo "  - Localhost: Uses anvil default private key (no secrets)"
+	@echo "  - Production: Uses keystore (--account keyDeployer)"
+	@echo "  - NEVER store private keys in .env or config files"
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# NETWORK-SPECIFIC DEPLOYMENTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Localhost deployment (uses anvil default private key - no secrets needed)
+deploy-localhost:
+	@echo "Deploying to LOCALHOST..."
+	@forge script script/Deploy.s.sol:DeployAll \
+		--rpc-url http://localhost:8545 \
+		--broadcast \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		--slow
+	@$(MAKE) format-output
+
+# Sepolia deployment (uses keystore for production security)
+deploy-sepolia:
+	@echo "Deploying to SEPOLIA..."
+	@forge script script/Deploy.s.sol:DeployAll \
+		--rpc-url $${RPC_SEPOLIA} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow \
+		--verify \
+		--etherscan-api-key $${ETHERSCAN_API_KEY}
+	@$(MAKE) format-output
+
+# Mainnet deployment (uses keystore for production security)
+deploy-mainnet:
+	@echo "Deploying to MAINNET..."
+	@forge script script/Deploy.s.sol:DeployAll \
+		--rpc-url $${RPC_MAINNET} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow \
+		--verify \
+		--etherscan-api-key $${ETHERSCAN_API_KEY}
+	@$(MAKE) format-output
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP-BY-STEP DEPLOYMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Implementation only
+deploy-impl-localhost:
+	@echo "Deploying implementation to LOCALHOST..."
+	@forge script script/Deploy.s.sol:Deploy \
+		--rpc-url http://localhost:8545 \
+		--broadcast \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		--slow
+
+deploy-impl-sepolia:
+	@echo "Deploying implementation to SEPOLIA..."
+	@forge script script/Deploy.s.sol:Deploy \
+		--rpc-url $${RPC_SEPOLIA} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+deploy-impl-mainnet:
+	@echo "Deploying implementation to MAINNET..."
+	@forge script script/Deploy.s.sol:Deploy \
+		--rpc-url $${RPC_MAINNET} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+# Proxy only (requires implementation deployed)
+deploy-proxy-localhost:
+	@echo "Deploying proxy to LOCALHOST..."
+	@forge script script/Deploy.s.sol:DeployProxy \
+		--rpc-url http://localhost:8545 \
+		--broadcast \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		--slow
+
+deploy-proxy-sepolia:
+	@echo "Deploying proxy to SEPOLIA..."
+	@forge script script/Deploy.s.sol:DeployProxy \
+		--rpc-url $${RPC_SEPOLIA} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+deploy-proxy-mainnet:
+	@echo "Deploying proxy to MAINNET..."
+	@forge script script/Deploy.s.sol:DeployProxy \
+		--rpc-url $${RPC_MAINNET} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+# Hooks only (requires proxy deployed)
+deploy-hooks-localhost:
+	@echo "Deploying hooks to LOCALHOST..."
+	@forge script script/Deploy.s.sol:DeployHooks \
+		--rpc-url http://localhost:8545 \
+		--broadcast \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		--slow
+
+deploy-hooks-sepolia:
+	@echo "Deploying hooks to SEPOLIA..."
+	@forge script script/Deploy.s.sol:DeployHooks \
+		--rpc-url $${RPC_SEPOLIA} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+deploy-hooks-mainnet:
+	@echo "Deploying hooks to MAINNET..."
+	@forge script script/Deploy.s.sol:DeployHooks \
+		--rpc-url $${RPC_MAINNET} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+# Install hooks on existing MetaWallet
+install-hooks-localhost:
+	@echo "Installing hooks on LOCALHOST..."
+	@forge script script/Deploy.s.sol:InstallHooks \
+		--rpc-url http://localhost:8545 \
+		--broadcast \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		--slow
+
+install-hooks-sepolia:
+	@echo "Installing hooks on SEPOLIA..."
+	@forge script script/Deploy.s.sol:InstallHooks \
+		--rpc-url $${RPC_SEPOLIA} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+install-hooks-mainnet:
+	@echo "Installing hooks on MAINNET..."
+	@forge script script/Deploy.s.sol:InstallHooks \
+		--rpc-url $${RPC_MAINNET} \
+		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# UTILITIES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Format JSON output files
+format-output:
+	@echo "Formatting JSON output files..."
+	@for file in deployments/output/*/*.json; do \
+		if [ -f "$$file" ]; then \
+			echo "Formatting $$file"; \
+			jq . "$$file" > "$$file.tmp" && mv "$$file.tmp" "$$file"; \
+		fi; \
+	done
+	@echo "JSON files formatted!"
+
+# Predict proxy address
+predict-address:
+	@forge script script/Deploy.s.sol:PredictProxyAddress -vvvv
+
+# Verification
+verify:
+	@echo "Verifying deployment..."
+	@if [ ! -f "deployments/output/localhost/addresses.json" ] && [ ! -f "deployments/output/mainnet/addresses.json" ] && [ ! -f "deployments/output/sepolia/addresses.json" ]; then \
+		echo "No deployment files found"; \
+		exit 1; \
+	fi
+	@echo "Deployment files exist"
+	@echo "Check deployments/output/ for contract addresses"
+
+# Clean localhost deployment
+clean:
+	forge clean
+	rm -f deployments/output/localhost/addresses.json
+
+# Clean all deployments (DANGER)
+clean-all:
+	forge clean
+	rm -f deployments/output/*/addresses.json
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # BUILD & TEST
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
 
 ## Build the project
 build:
@@ -36,10 +263,6 @@ fmt:
 fmt-check:
 	forge fmt --check
 
-## Clean build artifacts
-clean:
-	forge clean
-
 ## Install dependencies
 install:
 	forge soldeer install
@@ -52,344 +275,58 @@ sizes:
 snapshot:
 	forge snapshot
 
-# =============================================================================
-# DEPLOYMENT - IMPLEMENTATION (Deploy once, use on all chains)
-# =============================================================================
+## Generate documentation
+docs:
+	forge doc --serve --port 4000
 
-## Deploy implementation to Sepolia
-deploy-impl-sepolia:
-	@echo "Deploying implementation to Sepolia..."
-	forge script script/Deploy.s.sol:Deploy \
-		--rpc-url sepolia \
+# ═══════════════════════════════════════════════════════════════════════════════
+# MULTI-CHAIN DEPLOYMENT (for L2s)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+deploy-arbitrum:
+	@echo "Deploying to ARBITRUM..."
+	@forge script script/Deploy.s.sol:DeployAll \
+		--rpc-url $${RPC_ARBITRUM} \
 		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow \
 		--verify \
-		--slow \
-		-vvvv
+		--etherscan-api-key $${ARBISCAN_API_KEY}
+	@$(MAKE) format-output
 
-## Deploy implementation to Mainnet
-deploy-impl-mainnet:
-	@echo "Deploying implementation to Mainnet..."
-	forge script script/Deploy.s.sol:Deploy \
-		--rpc-url mainnet \
+deploy-optimism:
+	@echo "Deploying to OPTIMISM..."
+	@forge script script/Deploy.s.sol:DeployAll \
+		--rpc-url $${RPC_OPTIMISM} \
 		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow \
 		--verify \
-		--slow \
-		-vvvv
+		--etherscan-api-key $${OPTIMISM_API_KEY}
+	@$(MAKE) format-output
 
-## Deploy implementation to Arbitrum
-deploy-impl-arbitrum:
-	@echo "Deploying implementation to Arbitrum..."
-	forge script script/Deploy.s.sol:Deploy \
-		--rpc-url arbitrum \
+deploy-base:
+	@echo "Deploying to BASE..."
+	@forge script script/Deploy.s.sol:DeployAll \
+		--rpc-url $${RPC_BASE} \
 		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow \
 		--verify \
-		--slow \
-		-vvvv
+		--etherscan-api-key $${BASESCAN_API_KEY}
+	@$(MAKE) format-output
 
-## Deploy implementation to Optimism
-deploy-impl-optimism:
-	@echo "Deploying implementation to Optimism..."
-	forge script script/Deploy.s.sol:Deploy \
-		--rpc-url optimism \
+deploy-polygon:
+	@echo "Deploying to POLYGON..."
+	@forge script script/Deploy.s.sol:DeployAll \
+		--rpc-url $${RPC_POLYGON} \
 		--broadcast \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		--slow \
 		--verify \
-		--slow \
-		-vvvv
-
-## Deploy implementation to Base
-deploy-impl-base:
-	@echo "Deploying implementation to Base..."
-	forge script script/Deploy.s.sol:Deploy \
-		--rpc-url base \
-		--broadcast \
-		--verify \
-		--slow \
-		-vvvv
-
-## Deploy implementation to Polygon
-deploy-impl-polygon:
-	@echo "Deploying implementation to Polygon..."
-	forge script script/Deploy.s.sol:Deploy \
-		--rpc-url polygon \
-		--broadcast \
-		--verify \
-		--slow \
-		-vvvv
-
-# =============================================================================
-# DEPLOYMENT - PROXY (Same address on all chains with CREATE2)
-# =============================================================================
-
-## Deploy proxy to Sepolia
-deploy-proxy-sepolia:
-	@echo "Deploying proxy to Sepolia..."
-	forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url sepolia \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy proxy to Mainnet
-deploy-proxy-mainnet:
-	@echo "Deploying proxy to Mainnet..."
-	forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url mainnet \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy proxy to Arbitrum
-deploy-proxy-arbitrum:
-	@echo "Deploying proxy to Arbitrum..."
-	forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url arbitrum \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy proxy to Optimism
-deploy-proxy-optimism:
-	@echo "Deploying proxy to Optimism..."
-	forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url optimism \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy proxy to Base
-deploy-proxy-base:
-	@echo "Deploying proxy to Base..."
-	forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url base \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy proxy to Polygon
-deploy-proxy-polygon:
-	@echo "Deploying proxy to Polygon..."
-	forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url polygon \
-		--broadcast \
-		--slow \
-		-vvvv
-
-# =============================================================================
-# DEPLOYMENT - PROXY WITH HOOKS
-# =============================================================================
-
-## Deploy proxy with hooks to Sepolia
-deploy-full-sepolia:
-	@echo "Deploying proxy with hooks to Sepolia..."
-	forge script script/Deploy.s.sol:DeployProxyWithHooks \
-		--rpc-url sepolia \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy proxy with hooks to Mainnet
-deploy-full-mainnet:
-	@echo "Deploying proxy with hooks to Mainnet..."
-	forge script script/Deploy.s.sol:DeployProxyWithHooks \
-		--rpc-url mainnet \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy proxy with hooks to Arbitrum
-deploy-full-arbitrum:
-	@echo "Deploying proxy with hooks to Arbitrum..."
-	forge script script/Deploy.s.sol:DeployProxyWithHooks \
-		--rpc-url arbitrum \
-		--broadcast \
-		--slow \
-		-vvvv
-
-# =============================================================================
-# ONE-COMMAND DEPLOYMENT (Implementation + Proxy + Hooks)
-# =============================================================================
-
-## Deploy everything to Sepolia (implementation + proxy + hooks)
-deploy-all-sepolia:
-	@echo "Deploying everything to Sepolia..."
-	forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url sepolia \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy everything to Mainnet
-deploy-all-mainnet:
-	@echo "Deploying everything to Mainnet..."
-	forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url mainnet \
-		--broadcast \
-		--verify \
-		--slow \
-		-vvvv
-
-## Deploy everything to Arbitrum
-deploy-all-arbitrum:
-	@echo "Deploying everything to Arbitrum..."
-	forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url arbitrum \
-		--broadcast \
-		--verify \
-		--slow \
-		-vvvv
-
-## Deploy everything to Optimism
-deploy-all-optimism:
-	@echo "Deploying everything to Optimism..."
-	forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url optimism \
-		--broadcast \
-		--verify \
-		--slow \
-		-vvvv
-
-## Deploy everything to Base
-deploy-all-base:
-	@echo "Deploying everything to Base..."
-	forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url base \
-		--broadcast \
-		--verify \
-		--slow \
-		-vvvv
-
-## Deploy everything to Polygon
-deploy-all-polygon:
-	@echo "Deploying everything to Polygon..."
-	forge script script/Deploy.s.sol:DeployAll \
-		--rpc-url polygon \
-		--broadcast \
-		--verify \
-		--slow \
-		-vvvv
-
-# =============================================================================
-# HOOKS DEPLOYMENT
-# =============================================================================
-
-## Deploy hooks for existing MetaWallet on Sepolia
-deploy-hooks-sepolia:
-	@echo "Deploying hooks to Sepolia..."
-	forge script script/Deploy.s.sol:DeployHooks \
-		--rpc-url sepolia \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Deploy hooks for existing MetaWallet on Mainnet
-deploy-hooks-mainnet:
-	@echo "Deploying hooks to Mainnet..."
-	forge script script/Deploy.s.sol:DeployHooks \
-		--rpc-url mainnet \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Install hooks on existing MetaWallet on Sepolia
-install-hooks-sepolia:
-	@echo "Installing hooks on Sepolia..."
-	forge script script/Deploy.s.sol:InstallHooks \
-		--rpc-url sepolia \
-		--broadcast \
-		--slow \
-		-vvvv
-
-## Install hooks on existing MetaWallet on Mainnet
-install-hooks-mainnet:
-	@echo "Installing hooks on Mainnet..."
-	forge script script/Deploy.s.sol:InstallHooks \
-		--rpc-url mainnet \
-		--broadcast \
-		--slow \
-		-vvvv
-
-# =============================================================================
-# UTILITIES
-# =============================================================================
-
-## Predict proxy address (requires FACTORY_ADDRESS, DEPLOYER_ADDRESS)
-predict-address:
-	@forge script script/Deploy.s.sol:PredictProxyAddress -vvvv
-
-## Dry run implementation deployment
-dry-run-impl:
-	@echo "Dry run implementation deployment..."
-	forge script script/Deploy.s.sol:Deploy \
-		--rpc-url sepolia \
-		-vvvv
-
-## Dry run proxy deployment
-dry-run-proxy:
-	@echo "Dry run proxy deployment..."
-	forge script script/Deploy.s.sol:DeployProxy \
-		--rpc-url sepolia \
-		-vvvv
-
-# =============================================================================
-# MULTI-CHAIN DEPLOYMENT
-# =============================================================================
-
-## Deploy implementation to all mainnets
-deploy-impl-all: deploy-impl-mainnet deploy-impl-arbitrum deploy-impl-optimism deploy-impl-base deploy-impl-polygon
-	@echo "Implementation deployed to all mainnets!"
-
-## Deploy proxy to all mainnets (same address via CREATE2)
-deploy-proxy-all: deploy-proxy-mainnet deploy-proxy-arbitrum deploy-proxy-optimism deploy-proxy-base deploy-proxy-polygon
-	@echo "Proxy deployed to all mainnets!"
-
-# =============================================================================
-# HELP
-# =============================================================================
-
-## Show this help
-help:
-	@echo "MetaWallet - Makefile Commands"
-	@echo ""
-	@echo "Usage: make [target]"
-	@echo ""
-	@echo "Build & Test:"
-	@echo "  build              Build the project"
-	@echo "  test               Run tests"
-	@echo "  test-gas           Run tests with gas reporting"
-	@echo "  coverage           Run coverage"
-	@echo "  fmt                Format code"
-	@echo "  fmt-check          Check formatting"
-	@echo "  clean              Clean build artifacts"
-	@echo "  install            Install dependencies"
-	@echo "  sizes              Show contract sizes"
-	@echo ""
-	@echo "One-Command Deployment (RECOMMENDED):"
-	@echo "  deploy-all-sepolia     Deploy everything to Sepolia"
-	@echo "  deploy-all-mainnet     Deploy everything to Mainnet"
-	@echo "  deploy-all-arbitrum    Deploy everything to Arbitrum"
-	@echo "  deploy-all-optimism    Deploy everything to Optimism"
-	@echo "  deploy-all-base        Deploy everything to Base"
-	@echo "  deploy-all-polygon     Deploy everything to Polygon"
-	@echo ""
-	@echo "Step-by-Step Deployment:"
-	@echo "  deploy-impl-*          Deploy implementation + VaultModule"
-	@echo "  deploy-proxy-*         Deploy proxy with VaultModule"
-	@echo "  deploy-full-*          Deploy proxy + VaultModule + hooks"
-	@echo ""
-	@echo "Hooks (for existing wallets):"
-	@echo "  deploy-hooks-*         Deploy hooks for existing MetaWallet"
-	@echo "  install-hooks-*        Install hooks on existing MetaWallet"
-	@echo ""
-	@echo "Utilities:"
-	@echo "  predict-address        Predict proxy address"
-	@echo "  dry-run-impl           Dry run implementation deployment"
-	@echo "  dry-run-proxy          Dry run proxy deployment"
-	@echo ""
-	@echo "Environment Variables:"
-	@echo "  PRIVATE_KEY            Deployer private key"
-	@echo "  FACTORY_ADDRESS        MinimalSmartAccountFactory address"
-	@echo "  REGISTRY_ADDRESS       Registry contract address"
-	@echo "  ASSET_ADDRESS          Underlying asset (e.g., USDC)"
-	@echo "  DEPLOY_SALT            (optional) Custom salt for CREATE2"
-	@echo "  VAULT_NAME             (optional) Vault token name"
-	@echo "  VAULT_SYMBOL           (optional) Vault token symbol"
+		--etherscan-api-key $${POLYGONSCAN_API_KEY}
+	@$(MAKE) format-output

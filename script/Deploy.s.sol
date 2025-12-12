@@ -6,30 +6,228 @@ import { Script, console } from "forge-std/Script.sol";
 import { MetaWallet } from "metawallet/src/MetaWallet.sol";
 import { ERC4626ApproveAndDepositHook } from "metawallet/src/hooks/ERC4626ApproveAndDepositHook.sol";
 import { ERC4626RedeemHook } from "metawallet/src/hooks/ERC4626RedeemHook.sol";
+import { OneInchSwapHook } from "metawallet/src/hooks/OneInchSwapHook.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
 import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
 import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
 
-/// @title Deploy
-/// @notice Deployment script for MetaWallet implementation and VaultModule
-contract Deploy is Script {
-    address public implementation;
-    address public vaultModule;
+import { DeploymentManager } from "./utils/DeploymentManager.sol";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MOCK CONTRACTS FOR LOCAL TESTING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { ERC20 } from "solady/tokens/ERC20.sol";
+
+/// @notice Mock ERC20 token for local testing
+contract MockERC20 is ERC20 {
+    string private _name;
+    string private _symbol;
+    uint8 private _decimals;
+
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) {
+        _name = name_;
+        _symbol = symbol_;
+        _decimals = decimals_;
+    }
+
+    function name() public view override returns (string memory) {
+        return _name;
+    }
+
+    function symbol() public view override returns (string memory) {
+        return _symbol;
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _decimals;
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
+
+/// @notice Mock Registry for local testing
+contract MockRegistry is IRegistry {
+    mapping(address => mapping(address => mapping(bytes4 => bool))) public allowed;
+
+    function authorizeAdapterCall(address, bytes4, bytes calldata) external pure override {
+        // Always allow for testing
+    }
+
+    function isAdapterSelectorAllowed(address, address, bytes4) external pure override returns (bool) {
+        return true; // Always allow for testing
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DEPLOYMENT SCRIPTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// @title DeployAll
+/// @notice One-command deployment: implementation + proxy + VaultModule + hooks
+/// @dev Uses JSON config files for deployment parameters
+contract DeployAll is Script, DeploymentManager {
+    struct DeployedContracts {
+        address asset;
+        address factory;
+        address registry;
+        address implementation;
+        address vaultModule;
+        address proxy;
+        address depositHook;
+        address redeemHook;
+        address oneInchSwapHook;
+    }
 
     function run() external {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+        // Read network configuration from JSON
+        NetworkConfig memory config = readNetworkConfig();
+        logConfig(config);
 
-        console.log("Deployer address:", deployer);
-        console.log("Chain ID:", block.chainid);
+        vm.startBroadcast();
 
-        vm.startBroadcast(deployerPrivateKey);
+        DeployedContracts memory deployed;
+        deployed.asset = config.external_.asset;
+        deployed.factory = config.external_.factory;
+        deployed.registry = config.external_.registry;
 
-        implementation = address(new MetaWallet());
+        // Deploy mock assets if needed (localhost/testnet)
+        if (config.deployment.deployMockAssets) {
+            _deployMocks(deployed, config.roles.owner);
+        }
+
+        // Deploy core contracts
+        _deployCore(deployed);
+
+        // Deploy proxy
+        _deployProxy(deployed, config);
+
+        // Setup VaultModule and hooks
+        _setupVaultAndHooks(deployed, config);
+
+        vm.stopBroadcast();
+
+        // Print summary
+        _printSummary(deployed, config);
+    }
+
+    function _deployMocks(DeployedContracts memory deployed, address owner) internal {
+        console.log("\n[0/6] Deploying mock assets for testing...");
+
+        MockERC20 mockAsset = new MockERC20("Mock USDC", "mUSDC", 6);
+        deployed.asset = address(mockAsset);
+        writeContractAddress("mockAsset", deployed.asset);
+        console.log("Mock Asset deployed:", deployed.asset);
+
+        mockAsset.mint(owner, 1_000_000 * 10 ** 6);
+
+        MockRegistry mockRegistry = new MockRegistry();
+        deployed.registry = address(mockRegistry);
+        writeContractAddress("mockRegistry", deployed.registry);
+        console.log("Mock Registry deployed:", deployed.registry);
+
+        MinimalSmartAccountFactory mockFactory = new MinimalSmartAccountFactory();
+        deployed.factory = address(mockFactory);
+        writeContractAddress("mockFactory", deployed.factory);
+        console.log("Mock Factory deployed:", deployed.factory);
+    }
+
+    function _deployCore(DeployedContracts memory deployed) internal {
+        deployed.implementation = address(new MetaWallet());
+        writeContractAddress("implementation", deployed.implementation);
+        console.log("\n[1/6] MetaWallet implementation:", deployed.implementation);
+
+        deployed.vaultModule = address(new VaultModule());
+        writeContractAddress("vaultModule", deployed.vaultModule);
+        console.log("[2/6] VaultModule:", deployed.vaultModule);
+    }
+
+    function _deployProxy(DeployedContracts memory deployed, NetworkConfig memory config) internal {
+        // Salt format: [20 bytes caller address][12 bytes custom salt]
+        // The factory checks that shr(96, salt) == caller
+        bytes32 fullSalt = bytes32(uint256(uint160(msg.sender)) << 96) | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
+
+        MinimalSmartAccountFactory factoryContract = MinimalSmartAccountFactory(deployed.factory);
+        address predictedAddress = factoryContract.predictDeterministicAddress(fullSalt);
+        console.log("Predicted proxy address:", predictedAddress);
+
+        string memory accountId = config.vault.accountId;
+        deployed.proxy = factoryContract.deployDeterministic(
+            deployed.implementation, msg.sender, fullSalt, config.roles.owner, IRegistry(deployed.registry), accountId
+        );
+        writeContractAddress("proxy", deployed.proxy);
+        console.log("[3/6] Proxy deployed:", deployed.proxy);
+
+        require(deployed.proxy == predictedAddress, "Address mismatch!");
+    }
+
+    function _setupVaultAndHooks(DeployedContracts memory deployed, NetworkConfig memory config) internal {
+        MetaWallet metaWallet = MetaWallet(payable(deployed.proxy));
+
+        // Grant ADMIN_ROLE (1 << 0 = 1) to the deployer so we can addFunctions
+        // The owner can grant roles, and we ARE the owner during broadcast
+        metaWallet.grantRoles(msg.sender, 1); // ADMIN_ROLE = 1
+        console.log("ADMIN_ROLE granted to deployer");
+
+        // Setup VaultModule
+        bytes4[] memory vaultSelectors = VaultModule(deployed.vaultModule).selectors();
+        metaWallet.addFunctions(vaultSelectors, deployed.vaultModule, false);
+        VaultModule(deployed.proxy).initializeVault(deployed.asset, config.vault.name, config.vault.symbol);
+        console.log("[4/6] VaultModule initialized");
+
+        // Deploy and install ERC4626 hooks
+        deployed.depositHook = address(new ERC4626ApproveAndDepositHook(deployed.proxy));
+        deployed.redeemHook = address(new ERC4626RedeemHook(deployed.proxy));
+        writeContractAddress("depositHook", deployed.depositHook);
+        writeContractAddress("redeemHook", deployed.redeemHook);
+
+        metaWallet.installHook(keccak256("hook.erc4626.deposit"), deployed.depositHook);
+        metaWallet.installHook(keccak256("hook.erc4626.redeem"), deployed.redeemHook);
+        console.log("[5/6] ERC4626 hooks deployed and installed");
+
+        // Deploy 1inch swap hook
+        deployed.oneInchSwapHook = address(new OneInchSwapHook(deployed.proxy));
+        writeContractAddress("oneInchSwapHook", deployed.oneInchSwapHook);
+        metaWallet.installHook(keccak256("hook.1inch.swap"), deployed.oneInchSwapHook);
+        console.log("[6/6] 1inch swap hook deployed and installed");
+    }
+
+    function _printSummary(DeployedContracts memory deployed, NetworkConfig memory config) internal pure {
+        console.log("\n========================================");
+        console.log("       DEPLOYMENT COMPLETE");
+        console.log("========================================");
+        console.log("Implementation:  ", deployed.implementation);
+        console.log("VaultModule:     ", deployed.vaultModule);
+        console.log("Proxy:           ", deployed.proxy);
+        console.log("Deposit Hook:    ", deployed.depositHook);
+        console.log("Redeem Hook:     ", deployed.redeemHook);
+        console.log("1inch Swap Hook: ", deployed.oneInchSwapHook);
+        console.log("----------------------------------------");
+        console.log("Vault Name:      ", config.vault.name);
+        console.log("Vault Symbol:    ", config.vault.symbol);
+        console.log("Asset:           ", deployed.asset);
+        console.log("========================================");
+    }
+}
+
+/// @title Deploy
+/// @notice Deployment script for MetaWallet implementation and VaultModule only
+contract Deploy is Script, DeploymentManager {
+    function run() external {
+        NetworkConfig memory config = readNetworkConfig();
+        logConfig(config);
+
+        vm.startBroadcast();
+
+        address implementation = address(new MetaWallet());
+        writeContractAddress("implementation", implementation);
         console.log("MetaWallet implementation deployed at:", implementation);
 
-        vaultModule = address(new VaultModule());
+        address vaultModule = address(new VaultModule());
+        writeContractAddress("vaultModule", vaultModule);
         console.log("VaultModule deployed at:", vaultModule);
 
         vm.stopBroadcast();
@@ -43,126 +241,46 @@ contract Deploy is Script {
 /// @title DeployProxy
 /// @notice Deploys a MetaWallet proxy with VaultModule using the MinimalSmartAccountFactory
 /// @dev Uses CREATE2 for deterministic addresses across chains
-contract DeployProxy is Script {
-    struct DeployConfig {
-        address factory;
-        address implementation;
-        address vaultModule;
-        address registry;
-        address owner;
-        address asset;
-        string accountId;
-        string vaultName;
-        string vaultSymbol;
-        bytes32 salt;
-    }
-
+contract DeployProxy is Script, DeploymentManager {
     function run() external returns (address proxy) {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+        NetworkConfig memory config = readNetworkConfig();
+        DeploymentOutput memory existing = readDeploymentOutput();
 
-        DeployConfig memory cfg = _loadConfig(deployer);
+        validateCoreDeployments(existing);
+        logConfig(config);
 
-        bytes32 fullSalt = bytes32(uint256(uint160(deployer))) | (cfg.salt >> 160);
+        // Salt format: [20 bytes caller address][12 bytes custom salt]
+        bytes32 fullSalt = bytes32(uint256(uint160(msg.sender)) << 96) | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
 
-        console.log("Chain ID:", block.chainid);
-        console.log("Factory:", cfg.factory);
-        console.log("Implementation:", cfg.implementation);
-        console.log("VaultModule:", cfg.vaultModule);
-        console.log("Owner:", cfg.owner);
-        console.log("Asset:", cfg.asset);
+        console.log("Implementation:", existing.contracts.implementation);
+        console.log("VaultModule:", existing.contracts.vaultModule);
 
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(cfg.factory);
+        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(config.external_.factory);
 
         address predictedAddress = factory.predictDeterministicAddress(fullSalt);
         console.log("Predicted proxy address:", predictedAddress);
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
 
         proxy = factory.deployDeterministic(
-            cfg.implementation, deployer, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
+            existing.contracts.implementation,
+            msg.sender,
+            fullSalt,
+            config.roles.owner,
+            IRegistry(config.external_.registry),
+            config.vault.accountId
         );
+        writeContractAddress("proxy", proxy);
         console.log("Proxy deployed at:", proxy);
 
-        _setupVaultModule(proxy, cfg);
-
-        vm.stopBroadcast();
-
-        require(proxy == predictedAddress, "Address mismatch!");
-
-        console.log("\n=== Deployment Summary ===");
-        console.log("Proxy:", proxy);
-        console.log("Vault Name:", cfg.vaultName);
-        console.log("Vault Symbol:", cfg.vaultSymbol);
-    }
-
-    function _loadConfig(address deployer) internal view returns (DeployConfig memory cfg) {
-        cfg.factory = vm.envAddress("FACTORY_ADDRESS");
-        cfg.implementation = vm.envAddress("IMPLEMENTATION_ADDRESS");
-        cfg.vaultModule = vm.envAddress("VAULT_MODULE_ADDRESS");
-        cfg.registry = vm.envAddress("REGISTRY_ADDRESS");
-        cfg.owner = vm.envOr("OWNER_ADDRESS", deployer);
-        cfg.asset = vm.envAddress("ASSET_ADDRESS");
-        cfg.accountId = vm.envOr("ACCOUNT_ID", string("metawallet.v1"));
-        cfg.vaultName = vm.envOr("VAULT_NAME", string("Meta Vault"));
-        cfg.vaultSymbol = vm.envOr("VAULT_SYMBOL", string("mVAULT"));
-        cfg.salt = bytes32(vm.envOr("DEPLOY_SALT", uint256(0)));
-    }
-
-    function _setupVaultModule(address proxy, DeployConfig memory cfg) internal {
+        // Setup VaultModule
         MetaWallet metaWallet = MetaWallet(payable(proxy));
-
-        bytes4[] memory vaultSelectors = VaultModule(cfg.vaultModule).selectors();
-        metaWallet.addFunctions(vaultSelectors, cfg.vaultModule, false);
+        bytes4[] memory vaultSelectors = VaultModule(existing.contracts.vaultModule).selectors();
+        metaWallet.addFunctions(vaultSelectors, existing.contracts.vaultModule, false);
         console.log("VaultModule functions added");
 
-        VaultModule(proxy).initializeVault(cfg.asset, cfg.vaultName, cfg.vaultSymbol);
-        console.log("Vault initialized with asset:", cfg.asset);
-    }
-}
-
-/// @title DeployProxyWithHooks
-/// @notice Deploys a MetaWallet proxy with VaultModule and ERC4626 hooks
-contract DeployProxyWithHooks is Script {
-    struct DeployConfig {
-        address factory;
-        address implementation;
-        address vaultModule;
-        address registry;
-        address owner;
-        address asset;
-        string accountId;
-        string vaultName;
-        string vaultSymbol;
-        bytes32 salt;
-    }
-
-    function run() external returns (address proxy, address depositHook, address redeemHook) {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
-
-        DeployConfig memory cfg = _loadConfig(deployer);
-
-        bytes32 fullSalt = bytes32(uint256(uint160(deployer))) | (cfg.salt >> 160);
-
-        console.log("Chain ID:", block.chainid);
-        console.log("Factory:", cfg.factory);
-        console.log("Implementation:", cfg.implementation);
-
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(cfg.factory);
-
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
-        console.log("Predicted proxy address:", predictedAddress);
-
-        vm.startBroadcast(deployerPrivateKey);
-
-        proxy = factory.deployDeterministic(
-            cfg.implementation, deployer, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
-        );
-
-        _setupVaultModule(proxy, cfg);
-
-        (depositHook, redeemHook) = _deployAndInstallHooks(proxy);
+        VaultModule(proxy).initializeVault(config.external_.asset, config.vault.name, config.vault.symbol);
+        console.log("Vault initialized with asset:", config.external_.asset);
 
         vm.stopBroadcast();
 
@@ -170,84 +288,34 @@ contract DeployProxyWithHooks is Script {
 
         console.log("\n=== Deployment Summary ===");
         console.log("Proxy:", proxy);
-        console.log("Deposit Hook:", depositHook);
-        console.log("Redeem Hook:", redeemHook);
-    }
-
-    function _loadConfig(address deployer) internal view returns (DeployConfig memory cfg) {
-        cfg.factory = vm.envAddress("FACTORY_ADDRESS");
-        cfg.implementation = vm.envAddress("IMPLEMENTATION_ADDRESS");
-        cfg.vaultModule = vm.envAddress("VAULT_MODULE_ADDRESS");
-        cfg.registry = vm.envAddress("REGISTRY_ADDRESS");
-        cfg.owner = vm.envOr("OWNER_ADDRESS", deployer);
-        cfg.asset = vm.envAddress("ASSET_ADDRESS");
-        cfg.accountId = vm.envOr("ACCOUNT_ID", string("metawallet.v1"));
-        cfg.vaultName = vm.envOr("VAULT_NAME", string("Meta Vault"));
-        cfg.vaultSymbol = vm.envOr("VAULT_SYMBOL", string("mVAULT"));
-        cfg.salt = bytes32(vm.envOr("DEPLOY_SALT", uint256(0)));
-    }
-
-    function _setupVaultModule(address proxy, DeployConfig memory cfg) internal {
-        MetaWallet metaWallet = MetaWallet(payable(proxy));
-
-        bytes4[] memory vaultSelectors = VaultModule(cfg.vaultModule).selectors();
-        metaWallet.addFunctions(vaultSelectors, cfg.vaultModule, false);
-
-        VaultModule(proxy).initializeVault(cfg.asset, cfg.vaultName, cfg.vaultSymbol);
-    }
-
-    function _deployAndInstallHooks(address proxy) internal returns (address depositHook, address redeemHook) {
-        depositHook = address(new ERC4626ApproveAndDepositHook(proxy));
-        redeemHook = address(new ERC4626RedeemHook(proxy));
-
-        MetaWallet metaWallet = MetaWallet(payable(proxy));
-
-        bytes32 depositHookId = keccak256("hook.erc4626.deposit");
-        bytes32 redeemHookId = keccak256("hook.erc4626.redeem");
-
-        metaWallet.installHook(depositHookId, depositHook);
-        metaWallet.installHook(redeemHookId, redeemHook);
-    }
-}
-
-/// @title PredictProxyAddress
-/// @notice Predicts the MetaWallet proxy address without deploying
-contract PredictProxyAddress is Script {
-    function run() external view {
-        address factoryAddress = vm.envAddress("FACTORY_ADDRESS");
-        address deployer = vm.envAddress("DEPLOYER_ADDRESS");
-        bytes32 salt = bytes32(vm.envOr("DEPLOY_SALT", uint256(0)));
-
-        bytes32 fullSalt = bytes32(uint256(uint160(deployer))) | (salt >> 160);
-
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(factoryAddress);
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
-
-        console.log("Factory:", factoryAddress);
-        console.log("Deployer:", deployer);
-        console.log("Salt:", vm.toString(salt));
-        console.log("Predicted proxy address:", predictedAddress);
+        console.log("Vault Name:", config.vault.name);
+        console.log("Vault Symbol:", config.vault.symbol);
     }
 }
 
 /// @title DeployHooks
-/// @notice Deploys ERC4626 hooks for an existing MetaWallet
-contract DeployHooks is Script {
-    function run() external returns (address depositHook, address redeemHook) {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+/// @notice Deploys hooks for an existing MetaWallet
+contract DeployHooks is Script, DeploymentManager {
+    function run() external {
+        DeploymentOutput memory existing = readDeploymentOutput();
+        require(existing.contracts.proxy != address(0), "Proxy not deployed");
 
-        address metaWalletAddress = vm.envAddress("METAWALLET_ADDRESS");
+        address proxy = existing.contracts.proxy;
+        console.log("MetaWallet:", proxy);
 
-        console.log("Chain ID:", block.chainid);
-        console.log("MetaWallet:", metaWalletAddress);
+        vm.startBroadcast();
 
-        vm.startBroadcast(deployerPrivateKey);
+        address depositHook = address(new ERC4626ApproveAndDepositHook(proxy));
+        address redeemHook = address(new ERC4626RedeemHook(proxy));
+        address oneInchSwapHook = address(new OneInchSwapHook(proxy));
 
-        depositHook = address(new ERC4626ApproveAndDepositHook(metaWalletAddress));
-        redeemHook = address(new ERC4626RedeemHook(metaWalletAddress));
+        writeContractAddress("depositHook", depositHook);
+        writeContractAddress("redeemHook", redeemHook);
+        writeContractAddress("oneInchSwapHook", oneInchSwapHook);
 
         console.log("Deposit Hook deployed at:", depositHook);
         console.log("Redeem Hook deployed at:", redeemHook);
+        console.log("1inch Swap Hook deployed at:", oneInchSwapHook);
 
         vm.stopBroadcast();
     }
@@ -255,26 +323,29 @@ contract DeployHooks is Script {
 
 /// @title InstallHooks
 /// @notice Installs hooks on an existing MetaWallet
-contract InstallHooks is Script {
+contract InstallHooks is Script, DeploymentManager {
     function run() external {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        DeploymentOutput memory existing = readDeploymentOutput();
+        require(existing.contracts.proxy != address(0), "Proxy not deployed");
+        require(existing.contracts.depositHook != address(0), "Deposit hook not deployed");
+        require(existing.contracts.redeemHook != address(0), "Redeem hook not deployed");
 
-        address metaWalletAddress = vm.envAddress("METAWALLET_ADDRESS");
-        address depositHookAddress = vm.envAddress("DEPOSIT_HOOK_ADDRESS");
-        address redeemHookAddress = vm.envAddress("REDEEM_HOOK_ADDRESS");
+        console.log("MetaWallet:", existing.contracts.proxy);
 
-        console.log("Chain ID:", block.chainid);
-        console.log("MetaWallet:", metaWalletAddress);
+        vm.startBroadcast();
 
-        vm.startBroadcast(deployerPrivateKey);
-
-        MetaWallet metaWallet = MetaWallet(payable(metaWalletAddress));
+        MetaWallet metaWallet = MetaWallet(payable(existing.contracts.proxy));
 
         bytes32 depositHookId = keccak256("hook.erc4626.deposit");
         bytes32 redeemHookId = keccak256("hook.erc4626.redeem");
 
-        metaWallet.installHook(depositHookId, depositHookAddress);
-        metaWallet.installHook(redeemHookId, redeemHookAddress);
+        metaWallet.installHook(depositHookId, existing.contracts.depositHook);
+        metaWallet.installHook(redeemHookId, existing.contracts.redeemHook);
+
+        if (existing.contracts.oneInchSwapHook != address(0)) {
+            bytes32 oneInchHookId = keccak256("hook.1inch.swap");
+            metaWallet.installHook(oneInchHookId, existing.contracts.oneInchSwapHook);
+        }
 
         console.log("Hooks installed successfully");
 
@@ -282,122 +353,21 @@ contract InstallHooks is Script {
     }
 }
 
-/// @title DeployAll
-/// @notice One-command deployment: implementation + proxy + VaultModule + hooks
-/// @dev Deploys everything needed for a fully functional MetaWallet
-contract DeployAll is Script {
-    struct DeployConfig {
-        address factory;
-        address registry;
-        address owner;
-        address asset;
-        string accountId;
-        string vaultName;
-        string vaultSymbol;
-        bytes32 salt;
-    }
+/// @title PredictProxyAddress
+/// @notice Predicts the MetaWallet proxy address without deploying
+contract PredictProxyAddress is Script, DeploymentManager {
+    function run() external view {
+        NetworkConfig memory config = readNetworkConfig();
 
-    struct DeployedAddresses {
-        address implementation;
-        address vaultModule;
-        address proxy;
-        address depositHook;
-        address redeemHook;
-    }
+        // Salt format: [20 bytes caller address][12 bytes custom salt]
+        bytes32 fullSalt = bytes32(uint256(uint160(config.roles.deployer)) << 96) | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
 
-    function run() external returns (DeployedAddresses memory deployed) {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
-
-        DeployConfig memory cfg = _loadConfig(deployer);
-
-        bytes32 fullSalt = bytes32(uint256(uint160(deployer))) | (cfg.salt >> 160);
-
-        console.log("=== DeployAll: Full MetaWallet Deployment ===");
-        console.log("Chain ID:", block.chainid);
-        console.log("Deployer:", deployer);
-        console.log("Factory:", cfg.factory);
-
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(cfg.factory);
+        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(config.external_.factory);
         address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+
+        console.log("Factory:", config.external_.factory);
+        console.log("Deployer:", config.roles.deployer);
+        console.log("Salt:", vm.toString(config.deployment.salt));
         console.log("Predicted proxy address:", predictedAddress);
-
-        vm.startBroadcast(deployerPrivateKey);
-
-        // Step 1: Deploy implementation contracts
-        deployed.implementation = address(new MetaWallet());
-        console.log("\n[1/5] MetaWallet implementation:", deployed.implementation);
-
-        deployed.vaultModule = address(new VaultModule());
-        console.log("[2/5] VaultModule:", deployed.vaultModule);
-
-        // Step 2: Deploy proxy via factory
-        deployed.proxy = factory.deployDeterministic(
-            deployed.implementation, deployer, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
-        );
-        console.log("[3/5] Proxy deployed:", deployed.proxy);
-
-        // Step 3: Setup VaultModule
-        _setupVaultModule(deployed.proxy, deployed.vaultModule, cfg);
-        console.log("[4/5] VaultModule initialized");
-
-        // Step 4: Deploy and install hooks
-        (deployed.depositHook, deployed.redeemHook) = _deployAndInstallHooks(deployed.proxy);
-        console.log("[5/5] Hooks deployed and installed");
-
-        vm.stopBroadcast();
-
-        require(deployed.proxy == predictedAddress, "Address mismatch!");
-
-        _printSummary(deployed, cfg);
-    }
-
-    function _loadConfig(address deployer) internal view returns (DeployConfig memory cfg) {
-        cfg.factory = vm.envAddress("FACTORY_ADDRESS");
-        cfg.registry = vm.envAddress("REGISTRY_ADDRESS");
-        cfg.owner = vm.envOr("OWNER_ADDRESS", deployer);
-        cfg.asset = vm.envAddress("ASSET_ADDRESS");
-        cfg.accountId = vm.envOr("ACCOUNT_ID", string("metawallet.v1"));
-        cfg.vaultName = vm.envOr("VAULT_NAME", string("Meta Vault"));
-        cfg.vaultSymbol = vm.envOr("VAULT_SYMBOL", string("mVAULT"));
-        cfg.salt = bytes32(vm.envOr("DEPLOY_SALT", uint256(0)));
-    }
-
-    function _setupVaultModule(address proxy, address vaultModuleAddr, DeployConfig memory cfg) internal {
-        MetaWallet metaWallet = MetaWallet(payable(proxy));
-
-        bytes4[] memory vaultSelectors = VaultModule(vaultModuleAddr).selectors();
-        metaWallet.addFunctions(vaultSelectors, vaultModuleAddr, false);
-
-        VaultModule(proxy).initializeVault(cfg.asset, cfg.vaultName, cfg.vaultSymbol);
-    }
-
-    function _deployAndInstallHooks(address proxy) internal returns (address depositHook, address redeemHook) {
-        depositHook = address(new ERC4626ApproveAndDepositHook(proxy));
-        redeemHook = address(new ERC4626RedeemHook(proxy));
-
-        MetaWallet metaWallet = MetaWallet(payable(proxy));
-
-        bytes32 depositHookId = keccak256("hook.erc4626.deposit");
-        bytes32 redeemHookId = keccak256("hook.erc4626.redeem");
-
-        metaWallet.installHook(depositHookId, depositHook);
-        metaWallet.installHook(redeemHookId, redeemHook);
-    }
-
-    function _printSummary(DeployedAddresses memory deployed, DeployConfig memory cfg) internal pure {
-        console.log("\n========================================");
-        console.log("       DEPLOYMENT COMPLETE");
-        console.log("========================================");
-        console.log("Implementation:  ", deployed.implementation);
-        console.log("VaultModule:     ", deployed.vaultModule);
-        console.log("Proxy:           ", deployed.proxy);
-        console.log("Deposit Hook:    ", deployed.depositHook);
-        console.log("Redeem Hook:     ", deployed.redeemHook);
-        console.log("----------------------------------------");
-        console.log("Vault Name:      ", cfg.vaultName);
-        console.log("Vault Symbol:    ", cfg.vaultSymbol);
-        console.log("Asset:           ", cfg.asset);
-        console.log("========================================");
     }
 }
