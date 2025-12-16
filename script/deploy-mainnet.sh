@@ -103,6 +103,7 @@ for ((i=0; i<$CHAIN_COUNT; i++)); do
 
     # Build deploy command
     DEPLOY_CMD="forge script script/deployment/06_DeployMainnet.s.sol:DeployMainnetScript \
+        --sig 'run()' \
         --rpc-url $RPC_URL \
         --broadcast \
         --account keyDeployer \

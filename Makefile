@@ -74,6 +74,7 @@ predict-mainnet:
 deploy-localhost:
 	@echo "Deploying to LOCALHOST..."
 	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+		--sig "run()" \
 		--rpc-url http://localhost:8545 \
 		--broadcast \
 		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
@@ -86,6 +87,7 @@ deploy-localhost:
 deploy-sepolia:
 	@echo "Deploying to SEPOLIA..."
 	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+		--sig "run()" \
 		--rpc-url $${RPC_SEPOLIA} \
 		--broadcast \
 		--account keyDeployer \
@@ -103,6 +105,7 @@ deploy-sepolia:
 deploy-mocks-localhost:
 	@echo "[00] Deploying mock assets to LOCALHOST..."
 	@forge script script/deployment/00_DeployMockAssets.s.sol:DeployMockAssetsScript \
+		--sig "run()" \
 		--rpc-url http://localhost:8545 \
 		--broadcast \
 		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
@@ -157,6 +160,7 @@ install-hooks-localhost:
 deploy-mocks-sepolia:
 	@echo "[00] Deploying mock assets to SEPOLIA..."
 	@forge script script/deployment/00_DeployMockAssets.s.sol:DeployMockAssetsScript \
+		--sig "run()" \
 		--rpc-url $${RPC_SEPOLIA} \
 		--broadcast \
 		--account keyDeployer \
