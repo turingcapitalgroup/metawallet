@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Script, console } from "forge-std/Script.sol";
+import { Script } from "forge-std/Script.sol";
 
 import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
 
@@ -12,39 +12,66 @@ import { DeploymentManager } from "../utils/DeploymentManager.sol";
 /// @notice Deploys mock assets for local testing (factory, registry, ERC20)
 /// @dev Only used for localhost/testnet deployments
 contract DeployMockAssetsScript is Script, DeploymentManager {
-    function run() external {
+    struct MockAssets {
+        address asset;
+        address registry;
+        address factory;
+    }
+
+    /// @notice Deploy with default settings (writeToJson = true)
+    function run() external returns (MockAssets memory) {
+        return run(true);
+    }
+
+    /// @notice Deploy mock assets with configurable JSON writing
+    /// @param writeToJson Whether to write deployed addresses to JSON output
+    /// @return assets The deployed mock asset addresses
+    function run(bool writeToJson) public returns (MockAssets memory assets) {
         NetworkConfig memory config = readNetworkConfig();
         logConfig(config);
 
         require(config.deployment.deployMockAssets, "Mock assets deployment disabled in config");
 
+        _log("=== DEPLOYING MOCK ASSETS ===");
+
         vm.startBroadcast();
 
         // Deploy mock asset (USDC-like)
         MockERC20 mockAsset = new MockERC20("Mock USDC", "mUSDC", 6);
-        writeContractAddress("mockAsset", address(mockAsset));
-        console.log("Mock Asset deployed:", address(mockAsset));
+        assets.asset = address(mockAsset);
+        if (writeToJson) {
+            writeContractAddress("mockAsset", assets.asset);
+        }
+        _log("Mock Asset deployed:", assets.asset);
 
         // Mint tokens to owner
         mockAsset.mint(config.roles.owner, 1_000_000 * 10 ** 6);
-        console.log("Minted 1M mUSDC to owner");
+        _log("Minted 1M mUSDC to owner");
 
         // Deploy mock registry
         MockRegistry mockRegistry = new MockRegistry();
-        writeContractAddress("mockRegistry", address(mockRegistry));
-        console.log("Mock Registry deployed:", address(mockRegistry));
+        assets.registry = address(mockRegistry);
+        if (writeToJson) {
+            writeContractAddress("mockRegistry", assets.registry);
+        }
+        _log("Mock Registry deployed:", assets.registry);
 
         // Deploy factory
         MinimalSmartAccountFactory mockFactory = new MinimalSmartAccountFactory();
-        writeContractAddress("mockFactory", address(mockFactory));
-        console.log("Mock Factory deployed:", address(mockFactory));
+        assets.factory = address(mockFactory);
+        if (writeToJson) {
+            writeContractAddress("mockFactory", assets.factory);
+        }
+        _log("Mock Factory deployed:", assets.factory);
 
         vm.stopBroadcast();
 
-        console.log("\n=== MOCK ASSETS DEPLOYMENT COMPLETE ===");
-        console.log("Mock Asset:    ", address(mockAsset));
-        console.log("Mock Registry: ", address(mockRegistry));
-        console.log("Mock Factory:  ", address(mockFactory));
-        console.log("========================================");
+        _log("=== MOCK ASSETS DEPLOYMENT COMPLETE ===");
+        _log("Mock Asset:   ", assets.asset);
+        _log("Mock Registry:", assets.registry);
+        _log("Mock Factory: ", assets.factory);
+        _log("========================================");
+
+        return assets;
     }
 }

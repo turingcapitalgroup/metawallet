@@ -12,6 +12,50 @@ abstract contract DeploymentManager is Script {
     using stdJson for string;
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // VERBOSE LOGGING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Controls whether deployment scripts log to console
+    /// @dev Set to false in tests to reduce noise
+    bool public verbose = true;
+
+    /// @notice Sets the verbose logging flag
+    /// @param _verbose Whether to enable verbose logging
+    function setVerbose(bool _verbose) public {
+        verbose = _verbose;
+    }
+
+    /// @dev Internal log helper - string only
+    function _log(string memory message) internal view {
+        if (verbose) console.log(message);
+    }
+
+    /// @dev Internal log helper - string + string
+    function _log(string memory message, string memory value) internal view {
+        if (verbose) console.log(message, value);
+    }
+
+    /// @dev Internal log helper - string + address
+    function _log(string memory message, address value) internal view {
+        if (verbose) console.log(message, value);
+    }
+
+    /// @dev Internal log helper - string + uint256
+    function _log(string memory message, uint256 value) internal view {
+        if (verbose) console.log(message, value);
+    }
+
+    /// @dev Internal log helper - string + bool
+    function _log(string memory message, bool value) internal view {
+        if (verbose) console.log(message, value);
+    }
+
+    /// @dev Internal log helper - string + bytes32
+    function _log(string memory message, bytes32 value) internal view {
+        if (verbose) console.log(message, vm.toString(value));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // CONFIGURATION STRUCTS
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -354,7 +398,7 @@ abstract contract DeploymentManager is Script {
         string memory json = _serializeDeploymentOutput(output);
         vm.writeFile(outputPath, json);
 
-        console.log(string.concat(contractName, " address written to: "), outputPath);
+        _log(string.concat(contractName, " address written to: "), outputPath);
     }
 
     /// @dev Serializes deployment output to JSON string
@@ -426,56 +470,56 @@ abstract contract DeploymentManager is Script {
 
     /// @notice Logs the configuration to console
     /// @param config The configuration to log
-    function logConfig(NetworkConfig memory config) internal pure {
-        console.log("=== DEPLOYMENT CONFIGURATION ===");
-        console.log("Network:", config.network);
-        console.log("Chain ID:", config.chainId);
-        console.log("Owner:", config.roles.owner);
-        console.log("Deployer:", config.roles.deployer);
-        console.log("Factory:", config.external_.factory);
-        console.log("Registry:", config.external_.registry);
-        console.log("Asset:", config.external_.asset);
-        console.log("Vault Name:", config.vault.name);
-        console.log("Vault Symbol:", config.vault.symbol);
-        console.log("Deploy Mock Assets:", config.deployment.deployMockAssets);
-        console.log("===============================");
+    function logConfig(NetworkConfig memory config) internal view {
+        _log("=== DEPLOYMENT CONFIGURATION ===");
+        _log("Network:", config.network);
+        _log("Chain ID:", config.chainId);
+        _log("Owner:", config.roles.owner);
+        _log("Deployer:", config.roles.deployer);
+        _log("Factory:", config.external_.factory);
+        _log("Registry:", config.external_.registry);
+        _log("Asset:", config.external_.asset);
+        _log("Vault Name:", config.vault.name);
+        _log("Vault Symbol:", config.vault.symbol);
+        _log("Deploy Mock Assets:", config.deployment.deployMockAssets);
+        _log("===============================");
     }
 
     /// @notice Logs deployed addresses to console
     /// @param output The deployment output to log
-    function logDeployment(DeploymentOutput memory output) internal pure {
-        console.log("=== DEPLOYED ADDRESSES ===");
-        console.log("Network:", output.network);
-        console.log("Implementation:", output.contracts.implementation);
-        console.log("VaultModule:", output.contracts.vaultModule);
-        console.log("Proxy:", output.contracts.proxy);
-        console.log("Deposit Hook:", output.contracts.depositHook);
-        console.log("Redeem Hook:", output.contracts.redeemHook);
-        console.log("1inch Swap Hook:", output.contracts.oneInchSwapHook);
-        console.log("==========================");
+    function logDeployment(DeploymentOutput memory output) internal view {
+        _log("=== DEPLOYED ADDRESSES ===");
+        _log("Network:", output.network);
+        _log("Implementation:", output.contracts.implementation);
+        _log("VaultModule:", output.contracts.vaultModule);
+        _log("Proxy:", output.contracts.proxy);
+        _log("Deposit Hook:", output.contracts.depositHook);
+        _log("Redeem Hook:", output.contracts.redeemHook);
+        _log("1inch Swap Hook:", output.contracts.oneInchSwapHook);
+        _log("==========================");
     }
 
     /// @notice Logs multi-chain configuration
     /// @param config The multi-chain configuration
-    function logMultiChainConfig(MultiChainConfig memory config) internal pure {
-        console.log("=== MULTI-CHAIN DEPLOYMENT CONFIG ===");
-        console.log("Owner:", config.roles.owner);
-        console.log("Deployer:", config.roles.deployer);
-        console.log("Vault Name Prefix:", config.vault.namePrefix);
-        console.log("Vault Symbol Prefix:", config.vault.symbolPrefix);
-        console.log("Salt:", vm.toString(config.deployment.salt));
-        console.log("=====================================");
+    function logMultiChainConfig(MultiChainConfig memory config) internal view {
+        _log("=== MULTI-CHAIN DEPLOYMENT CONFIG ===");
+        _log("Owner:", config.roles.owner);
+        _log("Deployer:", config.roles.deployer);
+        _log("Vault Name Prefix:", config.vault.namePrefix);
+        _log("Vault Symbol Prefix:", config.vault.symbolPrefix);
+        _log("Salt:", config.deployment.salt);
+        _log("=====================================");
     }
 
     /// @notice Logs chain-specific configuration
     /// @param chainConfig The chain configuration to log
-    function logChainConfig(ChainConfig memory chainConfig) internal pure {
-        console.log("=== CHAIN CONFIG ===");
-        console.log("Chain:", chainConfig.name);
-        console.log("Chain ID:", chainConfig.chainId);
-        console.log("Factory:", chainConfig.external_.factory);
-        console.log("Registry:", chainConfig.external_.registry);
-        console.log("Asset:", chainConfig.external_.asset);
-        console.log("====================");
+    function logChainConfig(ChainConfig memory chainConfig) internal view {
+        _log("=== CHAIN CONFIG ===");
+        _log("Chain:", chainConfig.name);
+        _log("Chain ID:", chainConfig.chainId);
+        _log("Factory:", chainConfig.external_.factory);
+        _log("Registry:", chainConfig.external_.registry);
+        _log("Asset:", chainConfig.external_.asset);
+        _log("====================");
     }
 }

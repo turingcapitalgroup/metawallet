@@ -33,9 +33,9 @@ sort_imports = true
 
 [dependencies]
 solady = "0.1.26"
-kam = { version = "1.0", git = "https://github.com/turingcapitalgroup/kam.git", rev = "bc3b567962df48f8c70ec2c2eafc696b872453fc" }
 minimal-smart-account = { version = "1.0", git = "https://github.com/turingcapitalgroup/minimal-smart-account.git", rev = "d2c304a9f64f445a4566f81efd792ac25a129371" }
 forge-std = "1.11.0"
+kam = { version = "1.0", git = "https://github.com/turingcapitalgroup/kam.git", branch = "development" }
 
 [soldeer]
 # whether soldeer manages remappings
