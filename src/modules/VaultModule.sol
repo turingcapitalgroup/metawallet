@@ -99,7 +99,6 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     )
         public
         override
-        whenNotPaused
         returns (uint256 requestId)
     {
         _checkNotPaused();

@@ -9,13 +9,13 @@ integrity = "84aa7d32f8c7329468cf16f31f0f74e68072e634fdbde98f3bb00c6b136103b2"
 name = "kam"
 version = "1.0"
 git = "https://github.com/turingcapitalgroup/kam.git"
-rev = "5eed859167e30177b89b33e39aef4f1f58906da6"
+rev = "1cda1bec8efda943fb7d667ce10523f902b6067a"
 
 [[dependencies]]
 name = "minimal-smart-account"
 version = "1.0"
 git = "https://github.com/turingcapitalgroup/minimal-smart-account.git"
-rev = "84037a414f8c8ba013d64079671030623af234c2"
+rev = "ff3875691a6406dc35b76468d20ec562edf49068"
 
 [[dependencies]]
 name = "solady"
