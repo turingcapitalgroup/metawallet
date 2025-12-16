@@ -46,8 +46,9 @@ contract DeployAllScript is Script, DeploymentManager {
         deployed.factory = config.external_.factory;
         deployed.registry = config.external_.registry;
 
-        // For testnets: check if mock assets already exist in output JSON AND on-chain
+        // Handle mock vs real assets based on config
         if (config.deployment.deployMockAssets) {
+            // For testnets: check if mock assets already exist in output JSON AND on-chain
             if (
                 existing.contracts.mockAsset != address(0) && existing.contracts.mockFactory != address(0)
                     && existing.contracts.mockRegistry != address(0) && existing.contracts.mockAsset.code.length > 0
@@ -65,6 +66,15 @@ contract DeployAllScript is Script, DeploymentManager {
                 // Deploy new mock assets (JSON is stale or contracts don't exist on-chain)
                 _deployMocks(deployed, config.roles.owner);
             }
+        } else {
+            // Use external addresses from config (for sepolia with real contracts or other testnets)
+            require(deployed.asset != address(0), "Missing asset address in config");
+            require(deployed.factory != address(0), "Missing factory address in config");
+            require(deployed.registry != address(0), "Missing registry address in config");
+            console.log("\n[0/6] Using external addresses from config:");
+            console.log("Asset:", deployed.asset);
+            console.log("Factory:", deployed.factory);
+            console.log("Registry:", deployed.registry);
         }
 
         // Deploy core contracts

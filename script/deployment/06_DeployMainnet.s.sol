@@ -40,15 +40,22 @@ contract DeployMainnetScript is Script, DeploymentManager {
         MultiChainConfig memory config = readMainnetConfig();
         logMultiChainConfig(config);
 
-        // Validate config
+        // Validate global config
         validateProductionConfig(config);
+
+        // Get chain-specific config for current network
+        ChainConfig memory chainConfig = getChainConfigForCurrentNetwork();
+        logChainConfig(chainConfig);
+
+        // Validate chain-specific config
+        validateChainConfig(chainConfig);
 
         vm.startBroadcast();
 
         DeployedContracts memory deployed;
-        deployed.asset = config.external_.asset;
-        deployed.factory = config.external_.factory;
-        deployed.registry = config.external_.registry;
+        deployed.asset = chainConfig.external_.asset;
+        deployed.factory = chainConfig.external_.factory;
+        deployed.registry = chainConfig.external_.registry;
 
         // Derive vault name and symbol from asset
         (deployed.vaultName, deployed.vaultSymbol) = _deriveVaultNameAndSymbol(deployed.asset, config);

@@ -66,6 +66,7 @@ abstract contract DeploymentManager is Script {
         string rpcEnvVar;
         string etherscanApiKeyEnvVar;
         bool verify;
+        ExternalAddresses external_;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -173,24 +174,17 @@ abstract contract DeploymentManager is Script {
 
         // Parse deployment settings
         config.deployment.salt = json.readBytes32(".deployment.salt");
-        config.deployment.deployMockAssets = json.readBool(".deployment.deployMockAssets");
 
         // Parse role addresses
         config.roles.owner = json.readAddress(".roles.owner");
         config.roles.deployer = json.readAddress(".roles.deployer");
-
-        // Parse external addresses
-        config.external_.factory = json.readAddress(".external.factory");
-        config.external_.registry = json.readAddress(".external.registry");
-        config.external_.asset = json.readAddress(".external.asset");
 
         // Parse vault config - use prefixes for production (name/symbol derived from asset)
         config.vault.namePrefix = json.readString(".vault.namePrefix");
         config.vault.symbolPrefix = json.readString(".vault.symbolPrefix");
         config.vault.accountId = json.readString(".vault.accountId");
 
-        // Parse chains array - we need to do this manually since stdJson doesn't support arrays well
-        // The chains will be parsed by the shell script and passed as environment variables
+        // External addresses are now per-chain, read via getChainConfigForCurrentNetwork()
         return config;
     }
 
@@ -221,7 +215,25 @@ abstract contract DeploymentManager is Script {
         chain.etherscanApiKeyEnvVar = json.readString(string.concat(prefix, ".etherscanApiKeyEnvVar"));
         chain.verify = json.readBool(string.concat(prefix, ".verify"));
 
+        // Parse per-chain external addresses
+        chain.external_.factory = json.readAddress(string.concat(prefix, ".external.factory"));
+        chain.external_.registry = json.readAddress(string.concat(prefix, ".external.registry"));
+        chain.external_.asset = json.readAddress(string.concat(prefix, ".external.asset"));
+
         return chain;
+    }
+
+    /// @notice Gets chain config for the current network (by chainId)
+    /// @return chain The chain configuration for the current network
+    function getChainConfigForCurrentNetwork() internal view returns (ChainConfig memory chain) {
+        uint256 count = getChainCount();
+        for (uint256 i = 0; i < count; i++) {
+            ChainConfig memory c = getChainConfig(i);
+            if (c.chainId == block.chainid) {
+                return c;
+            }
+        }
+        revert(string.concat("Chain not found in mainnet.json for chainId: ", vm.toString(block.chainid)));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -396,11 +408,16 @@ abstract contract DeploymentManager is Script {
     function validateProductionConfig(MultiChainConfig memory config) internal pure {
         require(config.roles.owner != address(0), "Missing owner address");
         require(config.roles.deployer != address(0), "Missing deployer address");
-        require(config.external_.factory != address(0), "Missing factory address");
-        require(config.external_.registry != address(0), "Missing registry address");
-        require(config.external_.asset != address(0), "Missing asset address");
-        require(bytes(config.vault.name).length > 0, "Missing vault name");
-        require(bytes(config.vault.symbol).length > 0, "Missing vault symbol");
+        require(bytes(config.vault.namePrefix).length > 0, "Missing vault name prefix");
+        require(bytes(config.vault.symbolPrefix).length > 0, "Missing vault symbol prefix");
+    }
+
+    /// @notice Validates per-chain external addresses
+    /// @param chainConfig The chain configuration to validate
+    function validateChainConfig(ChainConfig memory chainConfig) internal pure {
+        require(chainConfig.external_.factory != address(0), "Missing factory address for chain");
+        require(chainConfig.external_.registry != address(0), "Missing registry address for chain");
+        require(chainConfig.external_.asset != address(0), "Missing asset address for chain");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -444,12 +461,21 @@ abstract contract DeploymentManager is Script {
         console.log("=== MULTI-CHAIN DEPLOYMENT CONFIG ===");
         console.log("Owner:", config.roles.owner);
         console.log("Deployer:", config.roles.deployer);
-        console.log("Factory:", config.external_.factory);
-        console.log("Registry:", config.external_.registry);
-        console.log("Asset:", config.external_.asset);
-        console.log("Vault Name:", config.vault.name);
-        console.log("Vault Symbol:", config.vault.symbol);
+        console.log("Vault Name Prefix:", config.vault.namePrefix);
+        console.log("Vault Symbol Prefix:", config.vault.symbolPrefix);
         console.log("Salt:", vm.toString(config.deployment.salt));
         console.log("=====================================");
+    }
+
+    /// @notice Logs chain-specific configuration
+    /// @param chainConfig The chain configuration to log
+    function logChainConfig(ChainConfig memory chainConfig) internal pure {
+        console.log("=== CHAIN CONFIG ===");
+        console.log("Chain:", chainConfig.name);
+        console.log("Chain ID:", chainConfig.chainId);
+        console.log("Factory:", chainConfig.external_.factory);
+        console.log("Registry:", chainConfig.external_.registry);
+        console.log("Asset:", chainConfig.external_.asset);
+        console.log("====================");
     }
 }
