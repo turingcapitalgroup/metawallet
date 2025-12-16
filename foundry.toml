@@ -4,7 +4,6 @@ out = "out"
 libs = ["dependencies"]
 gas_reports = ['*']
 solc_version = "0.8.30"
-zast = true
 build_info = true
 extra_output = ["storageLayout"]
 dynamic_test_linking = true
@@ -15,7 +14,6 @@ evm_version = "cancun"
 optimizer_runs = 10_000
 
 [profile.solx]
-optimization = 3
 gas_limit = 100_000_000
 
 [lint]
