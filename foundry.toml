@@ -4,7 +4,6 @@ out = "out"
 libs = ["dependencies"]
 gas_reports = ['*']
 solc_version = "0.8.30"
-zast = true
 build_info = true
 extra_output = ["storageLayout"]
 dynamic_test_linking = true
@@ -15,7 +14,6 @@ evm_version = "cancun"
 optimizer_runs = 10_000
 
 [profile.solx]
-optimization = 3
 gas_limit = 100_000_000
 
 [lint]
@@ -33,9 +31,9 @@ sort_imports = true
 
 [dependencies]
 solady = "0.1.26"
-kam = { version = "1.0", git = "https://github.com/turingcapitalgroup/kam.git", rev = "bc3b567962df48f8c70ec2c2eafc696b872453fc" }
 minimal-smart-account = { version = "1.0", git = "https://github.com/turingcapitalgroup/minimal-smart-account.git", rev = "ff3875691a6406dc35b76468d20ec562edf49068" }
 forge-std = "1.11.0"
+kam = { version = "1.0", git = "https://github.com/turingcapitalgroup/kam.git", rev = "1cda1bec8efda943fb7d667ce10523f902b6067a" }
 
 [soldeer]
 # whether soldeer manages remappings
