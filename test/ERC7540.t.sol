@@ -18,6 +18,9 @@ contract ERC7540Test is BaseTest, ERC7540Events, ERC4626Events {
     IMetaWallet public metaWallet;
     ERC1967Factory public proxyFactory;
 
+    uint256 public constant ADMIN_ROLE = 1;
+    uint256 public constant WHITELISTED_ROLE = 2;
+
     function setUp() public {
         _setUp("MAINNET", 23_783_139);
         proxyFactory = new ERC1967Factory();
@@ -26,7 +29,8 @@ contract ERC7540Test is BaseTest, ERC7540Events, ERC4626Events {
             MinimalSmartAccount.initialize.selector, users.owner, makeAddr("registry"), "kam.metawallet.1.0"
         );
         address metaWalletProxy = proxyFactory.deployAndCall(address(metaWalletImplementation), users.admin, initData);
-        MetaWallet(payable(metaWalletProxy)).grantRoles(users.admin, 1); // ADMIN ROLE
+        MetaWallet(payable(metaWalletProxy)).grantRoles(users.admin, ADMIN_ROLE);
+        MetaWallet(payable(metaWalletProxy)).grantRoles(users.alice, WHITELISTED_ROLE);
         VaultModule vault = new VaultModule();
         bytes4[] memory vaultSelectors = vault.selectors();
         vm.startPrank(users.admin);
