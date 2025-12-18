@@ -19,7 +19,6 @@ import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
 // Local Interfaces
 import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
-import { IHook } from "metawallet/src/interfaces/IHook.sol";
 import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
 import { IMetaWallet } from "metawallet/src/interfaces/IMetaWallet.sol";
 

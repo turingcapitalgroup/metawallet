@@ -76,7 +76,7 @@ contract MockOneInchRouter {
                 actualAmount = IERC20(srcToken).balanceOf(msg.sender);
             }
             // Transfer source tokens from sender
-            IERC20(srcToken).transferFrom(msg.sender, address(this), actualAmount);
+            require(IERC20(srcToken).transferFrom(msg.sender, address(this), actualAmount), "Transfer failed");
         }
 
         // Calculate output amount based on exchange rate
@@ -86,7 +86,7 @@ contract MockOneInchRouter {
         require(returnAmount >= minReturn, "Insufficient return amount");
 
         // Transfer destination tokens to receiver
-        IERC20(dstToken).transfer(receiver, returnAmount);
+        require(IERC20(dstToken).transfer(receiver, returnAmount), "Transfer failed");
     }
 
     /// @notice Alternative swap function with different parameter order (matching 1inch v5 style)
@@ -116,7 +116,7 @@ contract MockOneInchRouter {
         flags;
 
         // Transfer source tokens from sender
-        IERC20(srcToken).transferFrom(msg.sender, address(this), amount);
+        require(IERC20(srcToken).transferFrom(msg.sender, address(this), amount), "Transfer failed");
         spentAmount = amount;
 
         // Calculate output amount based on exchange rate
@@ -126,7 +126,7 @@ contract MockOneInchRouter {
         require(returnAmount >= minReturnAmount, "Insufficient return amount");
 
         // Transfer destination tokens to receiver
-        IERC20(dstToken).transfer(dstReceiver, returnAmount);
+        require(IERC20(dstToken).transfer(dstReceiver, returnAmount), "Transfer failed");
     }
 
     /// @notice Simple unoswap function (single DEX swap)
@@ -145,7 +145,7 @@ contract MockOneInchRouter {
         returns (uint256 returnAmount)
     {
         // Transfer source tokens from sender
-        IERC20(srcToken).transferFrom(msg.sender, address(this), amount);
+        require(IERC20(srcToken).transferFrom(msg.sender, address(this), amount), "Transfer failed");
 
         // Calculate output amount based on exchange rate
         returnAmount = (amount * exchangeRate * decimalAdjustment) / 1e18;
@@ -154,7 +154,7 @@ contract MockOneInchRouter {
         require(returnAmount >= minReturn, "Insufficient return amount");
 
         // Transfer destination tokens to sender (typical unoswap behavior)
-        IERC20(dstToken).transfer(msg.sender, returnAmount);
+        require(IERC20(dstToken).transfer(msg.sender, returnAmount), "Transfer failed");
     }
 
     /* ///////////////////////////////////////////////////////////////
