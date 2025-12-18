@@ -6,7 +6,6 @@ import { Execution, IRegistry, LibCall, MinimalSmartAccount } from "minimal-smar
 
 // Local Contracts
 import { HookExecution, IHookExecution } from "./HookExecution.sol";
-import { IVaultModule } from "./interfaces/IVaultModule.sol";
 import { MultiFacetProxy } from "kam/base/MultiFacetProxy.sol";
 
 /// @title MetaWallet
@@ -82,7 +81,7 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
             bytes memory _params;
 
             // solhint-disable-next-line no-inline-assembly
-            assembly {
+            assembly ("memory-safe") {
                 // Load function selector (first 4 bytes)
                 _functionSig := mload(add(_callData, 32))
             }
@@ -93,7 +92,7 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
                 _params = new bytes(_paramsLength);
 
                 // solhint-disable-next-line no-inline-assembly
-                assembly {
+                assembly ("memory-safe") {
                     // Copy from _callData[4:] to _params
                     let _src := add(add(_callData, 32), 4) // _callData start + length slot + 4 bytes
                     let _dst := add(_params, 32) // _params start + length slot
@@ -132,7 +131,7 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc MultiFacetProxy
-    function _authorizeModifyFunctions(address _sender) internal override {
+    function _authorizeModifyFunctions(address) internal view override {
         _checkAdminRole();
     }
 }
