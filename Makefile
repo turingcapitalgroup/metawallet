@@ -3,7 +3,12 @@
 -include .env
 export
 
-.PHONY: help deploy-mainnet deploy-sepolia deploy-localhost deploy-all verify clean clean-all format-output
+.PHONY: help deploy-mainnet deploy-sepolia deploy-localhost deploy-all verify clean clean-all format-output \
+	deploy-localhost-dry-run deploy-sepolia-dry-run deploy-mainnet-dry-run \
+	deploy-mocks-localhost-dry-run deploy-impl-localhost-dry-run deploy-proxy-localhost-dry-run \
+	deploy-hooks-localhost-dry-run install-hooks-localhost-dry-run \
+	deploy-mocks-sepolia-dry-run deploy-impl-sepolia-dry-run deploy-proxy-sepolia-dry-run \
+	deploy-hooks-sepolia-dry-run install-hooks-sepolia-dry-run
 
 # Default target
 help:
@@ -19,12 +24,18 @@ help:
 	@echo "  make deploy-localhost   - Deploy to localhost (anvil)"
 	@echo "  make deploy-sepolia     - Deploy to Sepolia testnet"
 	@echo ""
+	@echo "Dry-Run (simulate without broadcasting):"
+	@echo "  make deploy-localhost-dry-run  - Simulate localhost deployment"
+	@echo "  make deploy-sepolia-dry-run    - Simulate Sepolia deployment"
+	@echo "  make deploy-mainnet-dry-run    - Simulate mainnet deployment"
+	@echo ""
 	@echo "Individual steps:"
 	@echo "  make deploy-mocks-*     - Deploy mock assets only (00)"
 	@echo "  make deploy-impl-*      - Deploy implementation + VaultModule only (01)"
 	@echo "  make deploy-proxy-*     - Deploy proxy (requires impl deployed) (02)"
 	@echo "  make deploy-hooks-*     - Deploy hooks (requires proxy deployed) (03)"
 	@echo "  make install-hooks-*    - Install hooks on existing MetaWallet (04)"
+	@echo "  (Add -dry-run suffix for simulation, e.g., deploy-impl-localhost-dry-run)"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make verify             - Verify deployment files exist"
@@ -96,6 +107,40 @@ deploy-sepolia:
 		--verify \
 		--etherscan-api-key $${ETHERSCAN_API_KEY}
 	@$(MAKE) format-output
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DRY-RUN DEPLOYMENTS (NO BROADCAST)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Localhost dry-run (simulates deployment without broadcasting)
+deploy-localhost-dry-run:
+	@echo "Dry-run deployment to LOCALHOST..."
+	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+		--sig "run()" \
+		--rpc-url http://localhost:8545 \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+		-vvvv
+
+# Sepolia dry-run (simulates deployment without broadcasting)
+deploy-sepolia-dry-run:
+	@echo "Dry-run deployment to SEPOLIA..."
+	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+		--sig "run()" \
+		--rpc-url $${RPC_SEPOLIA} \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		-vvvv
+
+# Mainnet dry-run (simulates deployment without broadcasting)
+deploy-mainnet-dry-run:
+	@echo "Dry-run deployment to MAINNET..."
+	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+		--sig "run()" \
+		--rpc-url $${RPC_MAINNET} \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS} \
+		-vvvv
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP-BY-STEP DEPLOYMENT - LOCALHOST
@@ -208,6 +253,86 @@ install-hooks-sepolia:
 		--slow
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# STEP-BY-STEP DRY-RUN - LOCALHOST
+# ═══════════════════════════════════════════════════════════════════════════════
+
+deploy-mocks-localhost-dry-run:
+	@echo "[00] Dry-run: mock assets to LOCALHOST..."
+	@forge script script/deployment/00_DeployMockAssets.s.sol:DeployMockAssetsScript \
+		--sig "run()" \
+		--rpc-url http://localhost:8545 \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+
+deploy-impl-localhost-dry-run:
+	@echo "[01] Dry-run: implementation to LOCALHOST..."
+	@forge script script/deployment/01_DeployImplementation.s.sol:DeployImplementationScript \
+		--rpc-url http://localhost:8545 \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+
+deploy-proxy-localhost-dry-run:
+	@echo "[02] Dry-run: proxy to LOCALHOST..."
+	@forge script script/deployment/02_DeployProxy.s.sol:DeployProxyScript \
+		--rpc-url http://localhost:8545 \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+
+deploy-hooks-localhost-dry-run:
+	@echo "[03] Dry-run: hooks to LOCALHOST..."
+	@forge script script/deployment/03_DeployHooks.s.sol:DeployHooksScript \
+		--rpc-url http://localhost:8545 \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+
+install-hooks-localhost-dry-run:
+	@echo "[04] Dry-run: install hooks on LOCALHOST..."
+	@forge script script/deployment/04_InstallHooks.s.sol:InstallHooksScript \
+		--rpc-url http://localhost:8545 \
+		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+		--sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP-BY-STEP DRY-RUN - SEPOLIA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+deploy-mocks-sepolia-dry-run:
+	@echo "[00] Dry-run: mock assets to SEPOLIA..."
+	@forge script script/deployment/00_DeployMockAssets.s.sol:DeployMockAssetsScript \
+		--sig "run()" \
+		--rpc-url $${RPC_SEPOLIA} \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS}
+
+deploy-impl-sepolia-dry-run:
+	@echo "[01] Dry-run: implementation to SEPOLIA..."
+	@forge script script/deployment/01_DeployImplementation.s.sol:DeployImplementationScript \
+		--rpc-url $${RPC_SEPOLIA} \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS}
+
+deploy-proxy-sepolia-dry-run:
+	@echo "[02] Dry-run: proxy to SEPOLIA..."
+	@forge script script/deployment/02_DeployProxy.s.sol:DeployProxyScript \
+		--rpc-url $${RPC_SEPOLIA} \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS}
+
+deploy-hooks-sepolia-dry-run:
+	@echo "[03] Dry-run: hooks to SEPOLIA..."
+	@forge script script/deployment/03_DeployHooks.s.sol:DeployHooksScript \
+		--rpc-url $${RPC_SEPOLIA} \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS}
+
+install-hooks-sepolia-dry-run:
+	@echo "[04] Dry-run: install hooks on SEPOLIA..."
+	@forge script script/deployment/04_InstallHooks.s.sol:InstallHooksScript \
+		--rpc-url $${RPC_SEPOLIA} \
+		--account keyDeployer \
+		--sender $${DEPLOYER_ADDRESS}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # UTILITIES
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -229,18 +354,18 @@ predict-address:
 # Verification
 verify:
 	@echo "Verifying deployment..."
-	@ls -la deployments/output/*/addresses.json 2>/dev/null || echo "No deployment files found"
+	@ls -la deployments/output/*/*.json 2>/dev/null || echo "No deployment files found"
 	@echo "Check deployments/output/ for contract addresses"
 
 # Clean localhost deployment
 clean:
 	forge clean
-	rm -f deployments/output/localhost/addresses.json
+	rm -f deployments/output/localhost/*.json
 
 # Clean all deployments (DANGER)
 clean-all:
 	forge clean
-	rm -f deployments/output/*/addresses.json
+	rm -f deployments/output/*/*.json
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BUILD & TEST

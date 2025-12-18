@@ -154,7 +154,7 @@ contract DeployAllScript is Script, DeploymentManager {
 
         string memory accountId = config.vault.accountId;
         deployed.proxy = factoryContract.deployDeterministic(
-            deployed.implementation, msg.sender, fullSalt, config.roles.owner, IRegistry(deployed.registry), accountId
+            deployed.implementation, fullSalt, config.roles.owner, IRegistry(deployed.registry), accountId
         );
         if (writeToJson) {
             writeContractAddress("proxy", deployed.proxy);

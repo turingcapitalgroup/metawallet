@@ -12,6 +12,8 @@ interface IVaultModule {
 
     event Unpaused(address indexed account);
 
+    event MaxAllowedDeltaUpdated(uint256 indexed maxAllowedDelta);
+
     /// @notice Initializes the vault logic with asset and token metadata
     /// @param _asset The address of the underlying asset
     /// @param _name The name of the vault token
@@ -32,6 +34,14 @@ interface IVaultModule {
     /// @notice Returns whether the vault is paused
     /// @return True if paused, false otherwise
     function paused() external view returns (bool);
+
+    /// @notice Returns the maximum allowed delta in BPS for settlement
+    /// @return The max allowed delta in basis points (10000 = 100%)
+    function maxAllowedDelta() external view returns (uint256);
+
+    /// @notice Sets the maximum allowed delta for settlement
+    /// @param _maxAllowedDelta The max delta in BPS (10000 = 100%, 0 = disabled)
+    function setMaxAllowedDelta(uint256 _maxAllowedDelta) external;
 
     /// @notice Directly settles the total assets and merkle root
     /// @param _newTotalAssets The new total asset amount to be set

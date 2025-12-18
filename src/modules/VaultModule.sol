@@ -21,13 +21,18 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     string constant VAULT_PAUSED = "MW1";
     string constant MISMATCHED_ARRAYS = "MW2";
+    string constant DELTA_EXCEEDS_MAX = "MW3";
+    string constant INVALID_BPS = "MW4";
 
     /* //////////////////////////////////////////////////////////////
                           STATE & ROLES
     //////////////////////////////////////////////////////////////*/
     uint256 public constant ADMIN_ROLE = _ROLE_0;
+    uint256 public constant WHITELISTED_ROLE = _ROLE_1;
     uint256 public constant MANAGER_ROLE = _ROLE_4;
     uint256 public constant EMERGENCY_ADMIN_ROLE = _ROLE_6;
+
+    uint256 public constant BPS_DENOMINATOR = 10_000;
 
     // Struct that holds all state for this module, stored at a single unique slot
     struct VaultModuleStorage {
@@ -39,6 +44,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         string name;
         string symbol;
         uint8 decimals;
+        uint256 maxAllowedDelta; // Max allowed delta in BPS (10000 = 100%)
     }
 
     // keccak256(abi.encode(uint256(keccak256("metawallet.storage.VaultModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -62,15 +68,25 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         require(!_getVaultModuleStorage().paused, VAULT_PAUSED);
     }
 
+    function _checkAdminRole() internal view {
+        _checkRoles(ADMIN_ROLE);
+    }
+
+    function _checkWhitelistedRole() internal view {
+        _checkRoles(WHITELISTED_ROLE);
+    }
+
+    function _checkManagerRole() internal view {
+        _checkRoles(MANAGER_ROLE);
+    }
+
+    function _checkEmergencyAdminRole() internal view {
+        _checkRoles(EMERGENCY_ADMIN_ROLE);
+    }
+
     /// @inheritdoc IVaultModule
-    function initializeVault(
-        address _asset,
-        string memory _name,
-        string memory _symbol
-    )
-        external
-        onlyRoles(ADMIN_ROLE)
-    {
+    function initializeVault(address _asset, string memory _name, string memory _symbol) external {
+        _checkAdminRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
         if ($.initialized) revert();
         $.asset = _asset;
@@ -101,6 +117,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         override
         returns (uint256 requestId)
     {
+        _checkWhitelistedRole();
         _checkNotPaused();
         if (owner != msg.sender) revert InvalidOperator();
         requestId = super.requestDeposit(assets, controller, owner);
@@ -253,13 +270,41 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         return _getVaultModuleStorage().paused;
     }
 
+    /// @inheritdoc IVaultModule
+    function maxAllowedDelta() public view returns (uint256) {
+        return _getVaultModuleStorage().maxAllowedDelta;
+    }
+
+    /// @inheritdoc IVaultModule
+    function setMaxAllowedDelta(uint256 _maxAllowedDelta) external {
+        _checkAdminRole();
+        require(_maxAllowedDelta <= BPS_DENOMINATOR, INVALID_BPS);
+        _getVaultModuleStorage().maxAllowedDelta = _maxAllowedDelta;
+        emit MaxAllowedDeltaUpdated(_maxAllowedDelta);
+    }
+
     /* //////////////////////////////////////////////////////////////
                         SETTLEMENT LOGIC
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IVaultModule
-    function settleTotalAssets(uint256 _newTotalAssets, bytes32 _merkleRoot) external onlyRoles(MANAGER_ROLE) {
+    function settleTotalAssets(uint256 _newTotalAssets, bytes32 _merkleRoot) external {
+        _checkManagerRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
+
+        // Validate delta if maxAllowedDelta is set (non-zero)
+        uint256 _maxDelta = $.maxAllowedDelta;
+        if (_maxDelta > 0) {
+            uint256 _currentTotalAssets = $.virtualTotalAssets;
+            if (_currentTotalAssets > 0) {
+                uint256 _delta = _newTotalAssets > _currentTotalAssets
+                    ? _newTotalAssets - _currentTotalAssets
+                    : _currentTotalAssets - _newTotalAssets;
+                uint256 _deltaBps = (_delta * BPS_DENOMINATOR) / _currentTotalAssets;
+                require(_deltaBps <= _maxDelta, DELTA_EXCEEDS_MAX);
+            }
+        }
+
         $.virtualTotalAssets = _newTotalAssets;
         $.merkleRoot = _merkleRoot;
         emit SettlementExecuted(_newTotalAssets, _merkleRoot);
@@ -270,14 +315,16 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IVaultModule
-    function pause() external onlyRoles(EMERGENCY_ADMIN_ROLE) {
+    function pause() external {
+        _checkEmergencyAdminRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
         $.paused = true;
         emit Paused(msg.sender);
     }
 
     /// @inheritdoc IVaultModule
-    function unpause() external onlyRoles(EMERGENCY_ADMIN_ROLE) {
+    function unpause() external {
+        _checkEmergencyAdminRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
         $.paused = false;
         emit Unpaused(msg.sender);
@@ -322,7 +369,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @inheritdoc IModule
     function selectors() external pure returns (bytes4[] memory _selectors) {
-        _selectors = new bytes4[](42);
+        _selectors = new bytes4[](44);
         _selectors[0] = this.DOMAIN_SEPARATOR.selector;
         _selectors[1] = this.allowance.selector;
         _selectors[2] = this.approve.selector;
@@ -365,6 +412,8 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _selectors[39] = bytes4(abi.encodeWithSignature("deposit(uint256,address,address)"));
         _selectors[40] = bytes4(abi.encodeWithSignature("mint(uint256,address,address)"));
         _selectors[41] = this.computeMerkleRoot.selector;
+        _selectors[42] = this.maxAllowedDelta.selector;
+        _selectors[43] = this.setMaxAllowedDelta.selector;
         return _selectors;
     }
 }

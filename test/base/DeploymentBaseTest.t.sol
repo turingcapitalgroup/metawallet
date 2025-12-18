@@ -132,7 +132,7 @@ contract DeploymentBaseTest is BaseTest {
         address predictedAddress = factory.predictDeterministicAddress(fullSalt);
 
         address proxy = factory.deployDeterministic(
-            address(implementation), users.owner, fullSalt, users.owner, IRegistry(address(registry)), accountId
+            address(implementation), fullSalt, users.owner, IRegistry(address(registry)), accountId
         );
 
         require(proxy == predictedAddress, "Address mismatch!");

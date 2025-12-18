@@ -17,6 +17,7 @@ import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 import { IERC4626 } from "metawallet/src/interfaces/IERC4626.sol";
 import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
 import { IMetaWallet } from "metawallet/src/interfaces/IMetaWallet.sol";
+import { IVaultModule } from "metawallet/src/interfaces/IVaultModule.sol";
 
 import { MockRegistry } from "metawallet/test/helpers/mocks/MockRegistry.sol";
 
@@ -51,10 +52,11 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
     address public constant EXTERNAL_VAULT_B = 0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB;
     address public constant EXTERNAL_VAULT = EXTERNAL_VAULT_A;
 
-    uint256 public constant ADMIN_ROLE = 1;
-    uint256 public constant EXECUTOR_ROLE = 2;
-    uint256 public constant MANAGER_ROLE = 16;
-    uint256 public constant EMERGENCY_ADMIN_ROLE = 64;
+    uint256 public constant ADMIN_ROLE = 1; // _ROLE_0
+    uint256 public constant WHITELISTED_ROLE = 2; // _ROLE_1
+    uint256 public constant EXECUTOR_ROLE = 2; // _ROLE_1 (same as WHITELISTED_ROLE)
+    uint256 public constant MANAGER_ROLE = 16; // _ROLE_4
+    uint256 public constant EMERGENCY_ADMIN_ROLE = 64; // _ROLE_6
 
     /* ///////////////////////////////////////////////////////////////
                               SETUP
@@ -80,6 +82,8 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         MetaWallet(payable(_metaWalletProxy)).grantRoles(users.owner, EXECUTOR_ROLE);
         MetaWallet(payable(_metaWalletProxy)).grantRoles(users.executor, MANAGER_ROLE);
         MetaWallet(payable(_metaWalletProxy)).grantRoles(users.charlie, EMERGENCY_ADMIN_ROLE);
+        MetaWallet(payable(_metaWalletProxy)).grantRoles(users.alice, WHITELISTED_ROLE);
+        MetaWallet(payable(_metaWalletProxy)).grantRoles(users.bob, WHITELISTED_ROLE);
         vm.stopPrank();
 
         VaultModule _vault = new VaultModule();
@@ -964,5 +968,189 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _assets = metaWallet.redeem(_shares, _user, _user);
         vm.stopPrank();
         return _assets;
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                    SECTION 14: MAX ALLOWED DELTA TESTS
+    ///////////////////////////////////////////////////////////////*/
+
+    function test_SetMaxAllowedDelta_Success() public {
+        uint256 _maxDelta = 500; // 5% in BPS
+
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(_maxDelta);
+
+        assertEq(metaWallet.maxAllowedDelta(), _maxDelta);
+    }
+
+    function test_SetMaxAllowedDelta_EmitsEvent() public {
+        uint256 _maxDelta = 500; // 5%
+
+        vm.prank(users.admin);
+        vm.expectEmit(true, false, false, false);
+        emit IVaultModule.MaxAllowedDeltaUpdated(_maxDelta);
+        metaWallet.setMaxAllowedDelta(_maxDelta);
+    }
+
+    function testRevert_SetMaxAllowedDelta_Unauthorized() public {
+        vm.prank(users.alice);
+        vm.expectRevert();
+        metaWallet.setMaxAllowedDelta(500);
+    }
+
+    function testRevert_SetMaxAllowedDelta_ExceedsBPS() public {
+        vm.prank(users.admin);
+        vm.expectRevert(bytes("MW4"));
+        metaWallet.setMaxAllowedDelta(10_001); // > 100%
+    }
+
+    function test_Settlement_WithinDelta_Success() public {
+        uint256 _depositAmount = 10_000 * _1_USDC;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        // Set max delta to 10%
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(1000); // 10% in BPS
+
+        // Settle with 5% increase (within 10% limit)
+        uint256 _newTotalAssets = _depositAmount + (_depositAmount * 5 / 100); // 10,500 USDC
+        bytes32 _merkleRoot = keccak256(abi.encodePacked("yield"));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+
+        assertEq(metaWallet.totalAssets(), _newTotalAssets);
+    }
+
+    function test_Settlement_WithinDelta_Decrease_Success() public {
+        uint256 _depositAmount = 10_000 * _1_USDC;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        // Set max delta to 10%
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(1000); // 10% in BPS
+
+        // Settle with 5% decrease (within 10% limit)
+        uint256 _newTotalAssets = _depositAmount - (_depositAmount * 5 / 100); // 9,500 USDC
+        bytes32 _merkleRoot = keccak256(abi.encodePacked("loss"));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+
+        assertEq(metaWallet.totalAssets(), _newTotalAssets);
+    }
+
+    function testRevert_Settlement_ExceedsDelta_Increase() public {
+        uint256 _depositAmount = 10_000 * _1_USDC;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        // Set max delta to 5%
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(500); // 5% in BPS
+
+        // Try to settle with 10% increase (exceeds 5% limit)
+        uint256 _newTotalAssets = _depositAmount + (_depositAmount * 10 / 100); // 11,000 USDC
+        bytes32 _merkleRoot = keccak256(abi.encodePacked("big_yield"));
+
+        vm.prank(users.executor);
+        vm.expectRevert(bytes("MW3"));
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+    }
+
+    function testRevert_Settlement_ExceedsDelta_Decrease() public {
+        uint256 _depositAmount = 10_000 * _1_USDC;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        // Set max delta to 5%
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(500); // 5% in BPS
+
+        // Try to settle with 10% decrease (exceeds 5% limit)
+        uint256 _newTotalAssets = _depositAmount - (_depositAmount * 10 / 100); // 9,000 USDC
+        bytes32 _merkleRoot = keccak256(abi.encodePacked("big_loss"));
+
+        vm.prank(users.executor);
+        vm.expectRevert(bytes("MW3"));
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+    }
+
+    function test_Settlement_DeltaDisabled_NoRestriction() public {
+        uint256 _depositAmount = 10_000 * _1_USDC;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        // maxAllowedDelta is 0 by default (disabled)
+        assertEq(metaWallet.maxAllowedDelta(), 0);
+
+        // Settle with 50% increase (would fail if delta was enforced)
+        uint256 _newTotalAssets = _depositAmount + (_depositAmount * 50 / 100); // 15,000 USDC
+        bytes32 _merkleRoot = keccak256(abi.encodePacked("huge_yield"));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+
+        assertEq(metaWallet.totalAssets(), _newTotalAssets);
+    }
+
+    function test_Settlement_ZeroTotalAssets_NoDeltaCheck() public {
+        // Set max delta to 1%
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(100); // 1% in BPS
+
+        // totalAssets is 0, settle to any value (no delta check when current is 0)
+        uint256 _newTotalAssets = 10_000 * _1_USDC;
+        bytes32 _merkleRoot = keccak256(abi.encodePacked("initial"));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+
+        assertEq(metaWallet.totalAssets(), _newTotalAssets);
+    }
+
+    function test_Settlement_ExactDelta_Success() public {
+        uint256 _depositAmount = 10_000 * _1_USDC;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        // Set max delta to exactly 10%
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(1000); // 10% in BPS
+
+        // Settle with exactly 10% increase (should succeed at boundary)
+        uint256 _newTotalAssets = _depositAmount + (_depositAmount * 10 / 100); // 11,000 USDC
+        bytes32 _merkleRoot = keccak256(abi.encodePacked("exact_yield"));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+
+        assertEq(metaWallet.totalAssets(), _newTotalAssets);
     }
 }
