@@ -26,6 +26,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
                           STATE & ROLES
     //////////////////////////////////////////////////////////////*/
     uint256 public constant ADMIN_ROLE = _ROLE_0;
+    uint256 public constant WHITELISTED_ROLE = _ROLE_1;
     uint256 public constant MANAGER_ROLE = _ROLE_4;
     uint256 public constant EMERGENCY_ADMIN_ROLE = _ROLE_6;
 
@@ -99,6 +100,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     )
         public
         override
+        onlyRoles(WHITELISTED_ROLE)
         returns (uint256 requestId)
     {
         _checkNotPaused();
