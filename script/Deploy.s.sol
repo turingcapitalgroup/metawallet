@@ -80,7 +80,7 @@ contract DeployProxy is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         proxy = factory.deployDeterministic(
-            cfg.implementation, deployer, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
+            cfg.implementation, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
         );
         console.log("Proxy deployed at:", proxy);
 
@@ -157,7 +157,7 @@ contract DeployProxyWithHooks is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         proxy = factory.deployDeterministic(
-            cfg.implementation, deployer, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
+            cfg.implementation, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
         );
 
         _setupVaultModule(proxy, cfg);
@@ -333,7 +333,7 @@ contract DeployAll is Script {
 
         // Step 2: Deploy proxy via factory
         deployed.proxy = factory.deployDeterministic(
-            deployed.implementation, deployer, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
+            deployed.implementation, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
         );
         console.log("[3/5] Proxy deployed:", deployed.proxy);
 

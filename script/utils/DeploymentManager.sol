@@ -120,6 +120,7 @@ abstract contract DeploymentManager is Script {
     struct DeploymentOutput {
         uint256 chainId;
         string network;
+        string accountId;
         uint256 timestamp;
         ContractAddresses contracts;
     }
@@ -284,21 +285,31 @@ abstract contract DeploymentManager is Script {
     // OUTPUT READING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Reads existing deployment output from JSON
+    /// @notice Reads existing deployment output from JSON using accountId from config
     /// @return output The parsed deployment output
     function readDeploymentOutput() internal view returns (DeploymentOutput memory output) {
+        NetworkConfig memory config = readNetworkConfig();
+        return readDeploymentOutput(config.vault.accountId);
+    }
+
+    /// @notice Reads existing deployment output from JSON for a specific accountId
+    /// @param accountId The account identifier for the deployment
+    /// @return output The parsed deployment output
+    function readDeploymentOutput(string memory accountId) internal view returns (DeploymentOutput memory output) {
         string memory network = getCurrentNetwork();
-        string memory outputPath = string.concat("deployments/output/", network, "/addresses.json");
+        string memory outputPath = string.concat("deployments/output/", network, "/", accountId, ".json");
 
         if (!vm.exists(outputPath)) {
             output.network = network;
             output.chainId = block.chainid;
+            output.accountId = accountId;
             return output;
         }
 
         string memory json = vm.readFile(outputPath);
         output.chainId = json.readUint(".chainId");
         output.network = json.readString(".network");
+        output.accountId = json.readString(".accountId");
         output.timestamp = json.readUint(".timestamp");
 
         // Parse all contract addresses (with existence checks)
@@ -362,16 +373,32 @@ abstract contract DeploymentManager is Script {
     // OUTPUT WRITING
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Writes a contract address to the deployment output JSON
+    /// @notice Writes a contract address to the deployment output JSON using accountId from config
     /// @param contractName The name of the contract
     /// @param contractAddress The deployed address
     function writeContractAddress(string memory contractName, address contractAddress) internal {
-        string memory network = getCurrentNetwork();
-        string memory outputPath = string.concat("deployments/output/", network, "/addresses.json");
+        NetworkConfig memory config = readNetworkConfig();
+        writeContractAddress(config.vault.accountId, contractName, contractAddress);
+    }
 
-        DeploymentOutput memory output = readDeploymentOutput();
+    /// @notice Writes a contract address to the deployment output JSON for a specific accountId
+    /// @param accountId The account identifier for the deployment
+    /// @param contractName The name of the contract
+    /// @param contractAddress The deployed address
+    function writeContractAddress(
+        string memory accountId,
+        string memory contractName,
+        address contractAddress
+    )
+        internal
+    {
+        string memory network = getCurrentNetwork();
+        string memory outputPath = string.concat("deployments/output/", network, "/", accountId, ".json");
+
+        DeploymentOutput memory output = readDeploymentOutput(accountId);
         output.chainId = block.chainid;
         output.network = network;
+        output.accountId = accountId;
         output.timestamp = block.timestamp;
 
         // Update the specific contract address
@@ -406,6 +433,7 @@ abstract contract DeploymentManager is Script {
         string memory json = "{";
         json = string.concat(json, '"chainId":', vm.toString(output.chainId), ",");
         json = string.concat(json, '"network":"', output.network, '",');
+        json = string.concat(json, '"accountId":"', output.accountId, '",');
         json = string.concat(json, '"timestamp":', vm.toString(output.timestamp), ",");
         json = string.concat(json, '"contracts":{');
 
@@ -490,6 +518,7 @@ abstract contract DeploymentManager is Script {
     function logDeployment(DeploymentOutput memory output) internal view {
         _log("=== DEPLOYED ADDRESSES ===");
         _log("Network:", output.network);
+        _log("Account ID:", output.accountId);
         _log("Implementation:", output.contracts.implementation);
         _log("VaultModule:", output.contracts.vaultModule);
         _log("Proxy:", output.contracts.proxy);

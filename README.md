@@ -62,9 +62,12 @@ This design ensures share price stability during strategy operations, which is c
 | Role | Permissions |
 |------|-------------|
 | `ADMIN_ROLE` | Install/uninstall hooks, add modules, initialize vault |
+| `WHITELISTED_ROLE` | Call `requestDeposit` on the vault |
 | `EXECUTOR_ROLE` | Execute wallet operations via hooks |
 | `MANAGER_ROLE` | Settle total assets and merkle roots |
 | `EMERGENCY_ADMIN_ROLE` | Pause/unpause the vault |
+
+> **Note**: `WHITELISTED_ROLE` and `EXECUTOR_ROLE` share the same role slot (`_ROLE_1`), so granting one automatically grants the other.
 
 ## User Flow
 
@@ -372,12 +375,38 @@ make deploy-proxy-polygon
 
 ### Dry Run
 
-Test deployment without broadcasting:
+Test deployment without broadcasting by adding `-dry-run` suffix to any deployment command:
 
 ```shell
-make dry-run-impl   # Test implementation deployment
-make dry-run-proxy  # Test proxy deployment
+# Full deployment dry-run
+make deploy-localhost-dry-run
+make deploy-sepolia-dry-run
+make deploy-mainnet-dry-run
+
+# Step-by-step dry-run
+make deploy-impl-localhost-dry-run
+make deploy-proxy-sepolia-dry-run
+make deploy-hooks-sepolia-dry-run
 ```
+
+### Deployment Output
+
+Deployment addresses are saved to `deployments/output/{network}/{accountId}.json`:
+
+```
+deployments/
+├── config/
+│   ├── localhost.json
+│   ├── sepolia.json
+│   └── mainnet.json
+└── output/
+    ├── localhost/
+    │   └── metawallet.v1.json
+    └── sepolia/
+        └── metawallet.v1.json
+```
+
+The `accountId` is configured in the network config file (e.g., `vault.accountId: "metawallet.v1"`). This allows multiple MetaWallet instances to be deployed on the same chain with different accountIds.
 
 ## Dependencies
 

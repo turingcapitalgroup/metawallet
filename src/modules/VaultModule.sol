@@ -26,6 +26,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
                           STATE & ROLES
     //////////////////////////////////////////////////////////////*/
     uint256 public constant ADMIN_ROLE = _ROLE_0;
+    uint256 public constant WHITELISTED_ROLE = _ROLE_1;
     uint256 public constant MANAGER_ROLE = _ROLE_4;
     uint256 public constant EMERGENCY_ADMIN_ROLE = _ROLE_6;
 
@@ -62,15 +63,25 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         require(!_getVaultModuleStorage().paused, VAULT_PAUSED);
     }
 
+    function _checkAdminRole() internal view {
+        _checkRoles(ADMIN_ROLE);
+    }
+
+    function _checkWhitelistedRole() internal view {
+        _checkRoles(WHITELISTED_ROLE);
+    }
+
+    function _checkManagerRole() internal view {
+        _checkRoles(MANAGER_ROLE);
+    }
+
+    function _checkEmergencyAdminRole() internal view {
+        _checkRoles(EMERGENCY_ADMIN_ROLE);
+    }
+
     /// @inheritdoc IVaultModule
-    function initializeVault(
-        address _asset,
-        string memory _name,
-        string memory _symbol
-    )
-        external
-        onlyRoles(ADMIN_ROLE)
-    {
+    function initializeVault(address _asset, string memory _name, string memory _symbol) external {
+        _checkAdminRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
         if ($.initialized) revert();
         $.asset = _asset;
@@ -101,6 +112,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         override
         returns (uint256 requestId)
     {
+        _checkWhitelistedRole();
         _checkNotPaused();
         if (owner != msg.sender) revert InvalidOperator();
         requestId = super.requestDeposit(assets, controller, owner);
@@ -258,7 +270,8 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IVaultModule
-    function settleTotalAssets(uint256 _newTotalAssets, bytes32 _merkleRoot) external onlyRoles(MANAGER_ROLE) {
+    function settleTotalAssets(uint256 _newTotalAssets, bytes32 _merkleRoot) external {
+        _checkManagerRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
         $.virtualTotalAssets = _newTotalAssets;
         $.merkleRoot = _merkleRoot;
@@ -270,14 +283,16 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IVaultModule
-    function pause() external onlyRoles(EMERGENCY_ADMIN_ROLE) {
+    function pause() external {
+        _checkEmergencyAdminRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
         $.paused = true;
         emit Paused(msg.sender);
     }
 
     /// @inheritdoc IVaultModule
-    function unpause() external onlyRoles(EMERGENCY_ADMIN_ROLE) {
+    function unpause() external {
+        _checkEmergencyAdminRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
         $.paused = false;
         emit Unpaused(msg.sender);

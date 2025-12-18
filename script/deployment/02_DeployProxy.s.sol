@@ -52,7 +52,6 @@ contract DeployProxyScript is Script, DeploymentManager {
         // Deploy proxy
         proxy = factory.deployDeterministic(
             existing.contracts.implementation,
-            msg.sender,
             fullSalt,
             config.roles.owner,
             IRegistry(registryAddr),

@@ -16,6 +16,14 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     using LibCall for address;
 
     /* ///////////////////////////////////////////////////////////////
+                          INTERNAL CHECKS
+    ///////////////////////////////////////////////////////////////*/
+
+    function _checkAdminRole() internal view {
+        _checkRoles(ADMIN_ROLE);
+    }
+
+    /* ///////////////////////////////////////////////////////////////
                          HOOK MANAGEMENT
     ///////////////////////////////////////////////////////////////*/
 
@@ -23,14 +31,14 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     /// @param _hookId The unique identifier for the hook
     /// @param _hookAddress The address of the hook implementation
     function installHook(bytes32 _hookId, address _hookAddress) external {
-        _checkRoles(ADMIN_ROLE);
+        _checkAdminRole();
         _installHook(_hookId, _hookAddress);
     }
 
     /// @inheritdoc IHookExecution
     /// @param _hookId The unique identifier for the hook to uninstall
     function uninstallHook(bytes32 _hookId) external {
-        _checkRoles(ADMIN_ROLE);
+        _checkAdminRole();
         _uninstallHook(_hookId);
     }
 
@@ -125,6 +133,6 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
 
     /// @inheritdoc MultiFacetProxy
     function _authorizeModifyFunctions(address _sender) internal override {
-        _checkRoles(ADMIN_ROLE);
+        _checkAdminRole();
     }
 }

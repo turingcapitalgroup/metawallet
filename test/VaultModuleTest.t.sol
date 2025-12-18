@@ -51,10 +51,11 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
     address public constant EXTERNAL_VAULT_B = 0xBEEF01735c132Ada46AA9aA4c54623cAA92A64CB;
     address public constant EXTERNAL_VAULT = EXTERNAL_VAULT_A;
 
-    uint256 public constant ADMIN_ROLE = 1;
-    uint256 public constant EXECUTOR_ROLE = 2;
-    uint256 public constant MANAGER_ROLE = 16;
-    uint256 public constant EMERGENCY_ADMIN_ROLE = 64;
+    uint256 public constant ADMIN_ROLE = 1; // _ROLE_0
+    uint256 public constant WHITELISTED_ROLE = 2; // _ROLE_1
+    uint256 public constant EXECUTOR_ROLE = 2; // _ROLE_1 (same as WHITELISTED_ROLE)
+    uint256 public constant MANAGER_ROLE = 16; // _ROLE_4
+    uint256 public constant EMERGENCY_ADMIN_ROLE = 64; // _ROLE_6
 
     /* ///////////////////////////////////////////////////////////////
                               SETUP
@@ -80,6 +81,8 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         MetaWallet(payable(_metaWalletProxy)).grantRoles(users.owner, EXECUTOR_ROLE);
         MetaWallet(payable(_metaWalletProxy)).grantRoles(users.executor, MANAGER_ROLE);
         MetaWallet(payable(_metaWalletProxy)).grantRoles(users.charlie, EMERGENCY_ADMIN_ROLE);
+        MetaWallet(payable(_metaWalletProxy)).grantRoles(users.alice, WHITELISTED_ROLE);
+        MetaWallet(payable(_metaWalletProxy)).grantRoles(users.bob, WHITELISTED_ROLE);
         vm.stopPrank();
 
         VaultModule _vault = new VaultModule();
