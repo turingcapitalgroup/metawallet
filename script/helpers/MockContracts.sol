@@ -39,11 +39,11 @@ contract MockERC20 is ERC20 {
 contract MockRegistry is IRegistry {
     mapping(address => mapping(address => mapping(bytes4 => bool))) public allowed;
 
-    function authorizeAdapterCall(address, bytes4, bytes calldata) external pure override {
+    function authorizeCall(address, bytes4, bytes calldata) external pure override {
         // Always allow for testing
     }
 
-    function isAdapterSelectorAllowed(address, address, bytes4) external pure override returns (bool) {
+    function isSelectorAllowed(address, address, bytes4) external pure override returns (bool) {
         return true; // Always allow for testing
     }
 }

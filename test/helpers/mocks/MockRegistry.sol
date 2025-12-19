@@ -34,23 +34,19 @@ contract MockRegistry is IRegistry {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IRegistry
-    function authorizeAdapterCall(address, bytes4, bytes calldata) external pure override {
+    function authorizeCall(address, bytes4, bytes calldata) external pure override {
         // Always allow for testing - override with allow() for specific restrictions
     }
 
     /// @inheritdoc IRegistry
-    function isAdapterSelectorAllowed(
-        address adapter,
-        address target,
-        bytes4 selector
-    )
+    function isSelectorAllowed(address executor, address target, bytes4 selector)
         external
         view
         override
         returns (bool)
     {
         // Check specific allowance first, then fall back to whitelist
-        if (allowed[adapter][target][selector]) {
+        if (allowed[executor][target][selector]) {
             return true;
         }
         return whitelistedTargets[target];
