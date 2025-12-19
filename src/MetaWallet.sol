@@ -117,7 +117,7 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
             }
 
             // Validate through registry
-            _registry.authorizeAdapterCall(_executions[_i].target, _functionSig, _params);
+            _registry.authorizeCall(_executions[_i].target, _functionSig, _params);
 
             // Execute call
             _results[_i] = _executions[_i].target.callContract(_executions[_i].value, _callData);
