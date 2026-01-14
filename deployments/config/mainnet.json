@@ -1,77 +1,35 @@
 {
-  "deployment": {
-    "type": "multichain",
-    "salt": "0x0000000000000000000000000000000000000000000000000000000000000001"
-  },
-  "chains": [
-    {
-      "name": "mainnet",
-      "chainId": 1,
-      "rpcEnvVar": "RPC_MAINNET",
-      "etherscanApiKeyEnvVar": "ETHERSCAN_API_KEY",
-      "verify": true,
-      "external": {
-        "factory": "0x0000000000000000000000000000000000000000",
-        "registry": "0x0000000000000000000000000000000000000000",
-        "asset": "0x0000000000000000000000000000000000000000"
-      }
-    },
-    {
-      "name": "arbitrum",
-      "chainId": 42161,
-      "rpcEnvVar": "RPC_ARBITRUM",
-      "etherscanApiKeyEnvVar": "ARBISCAN_API_KEY",
-      "verify": true,
-      "external": {
-        "factory": "0x0000000000000000000000000000000000000000",
-        "registry": "0x0000000000000000000000000000000000000000",
-        "asset": "0x0000000000000000000000000000000000000000"
-      }
-    },
-    {
-      "name": "optimism",
-      "chainId": 10,
-      "rpcEnvVar": "RPC_OPTIMISM",
-      "etherscanApiKeyEnvVar": "OPTIMISM_API_KEY",
-      "verify": true,
-      "external": {
-        "factory": "0x0000000000000000000000000000000000000000",
-        "registry": "0x0000000000000000000000000000000000000000",
-        "asset": "0x0000000000000000000000000000000000000000"
-      }
-    },
-    {
-      "name": "base",
-      "chainId": 8453,
-      "rpcEnvVar": "RPC_BASE",
-      "etherscanApiKeyEnvVar": "BASESCAN_API_KEY",
-      "verify": true,
-      "external": {
-        "factory": "0x0000000000000000000000000000000000000000",
-        "registry": "0x0000000000000000000000000000000000000000",
-        "asset": "0x0000000000000000000000000000000000000000"
-      }
-    },
-    {
-      "name": "polygon",
-      "chainId": 137,
-      "rpcEnvVar": "RPC_POLYGON",
-      "etherscanApiKeyEnvVar": "POLYGONSCAN_API_KEY",
-      "verify": true,
-      "external": {
-        "factory": "0x0000000000000000000000000000000000000000",
-        "registry": "0x0000000000000000000000000000000000000000",
-        "asset": "0x0000000000000000000000000000000000000000"
-      }
-    }
-  ],
+  "network": "mainnet",
+  "chainId": 1,
   "roles": {
     "owner": "0x0000000000000000000000000000000000000000",
     "deployer": "0x0000000000000000000000000000000000000000"
   },
-  "vault": {
-    "namePrefix": "MetaVault",
-    "symbolPrefix": "mv",
-    "accountId": "metawallet.v1"
-  }
+  "shared": {
+    "factory": "0x0000000000000000000000000000000000000000",
+    "registry": "0x0000000000000000000000000000000000000000"
+  },
+  "deployment": {
+    "deployMockAssets": false
+  },
+  "wallets": [
+    {
+      "id": "usdc",
+      "asset": "0x0000000000000000000000000000000000000000",
+      "vault": {
+        "name": "Meta Vault USDC",
+        "symbol": "mwUSDC"
+      },
+      "salt": "0x0000000000000000000000000000000000000000000000000000000000002001"
+    },
+    {
+      "id": "wbtc",
+      "asset": "0x0000000000000000000000000000000000000000",
+      "vault": {
+        "name": "Meta Vault WBTC",
+        "symbol": "mwBTC"
+      },
+      "salt": "0x0000000000000000000000000000000000000000000000000000000000002002"
+    }
+  ]
 }
