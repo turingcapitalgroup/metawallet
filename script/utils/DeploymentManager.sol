@@ -184,11 +184,20 @@ abstract contract DeploymentManager is Script {
         return config;
     }
 
-    /// @dev Gets the wallet count from JSON
+    /// @dev Gets the wallet count from JSON by iteratively checking indices
+    /// @notice Using parseRaw on complex nested arrays causes memory allocation errors in Foundry
     function _getWalletCount(string memory json) private pure returns (uint256) {
-        bytes memory walletsRaw = json.parseRaw(".wallets");
-        bytes[] memory wallets = abi.decode(walletsRaw, (bytes[]));
-        return wallets.length;
+        uint256 count = 0;
+        // Iterate until we find an index that doesn't exist
+        while (true) {
+            string memory idKey = string.concat(".wallets[", vm.toString(count), "].id");
+            try vm.parseJsonString(json, idKey) returns (string memory) {
+                count++;
+            } catch {
+                break;
+            }
+        }
+        return count;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
