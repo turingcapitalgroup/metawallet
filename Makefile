@@ -20,9 +20,9 @@ help:
 	@echo "  make validate-config    - Validate mainnet.json before deployment"
 	@echo "  make predict-mainnet    - Predict proxy address for mainnet deployment"
 	@echo ""
-	@echo "Single Chain Deployment:"
-	@echo "  make deploy-localhost   - Deploy to localhost (anvil)"
-	@echo "  make deploy-sepolia     - Deploy to Sepolia testnet"
+	@echo "Single Chain Deployment (USDC + WBTC wallets):"
+	@echo "  make deploy-localhost   - Deploy both wallets to localhost (anvil)"
+	@echo "  make deploy-sepolia     - Deploy both wallets to Sepolia testnet"
 	@echo ""
 	@echo "Dry-Run (simulate without broadcasting):"
 	@echo "  make deploy-localhost-dry-run  - Simulate localhost deployment"
@@ -82,9 +82,10 @@ predict-mainnet:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Localhost deployment (uses anvil default private key - no secrets needed)
+# Deploys both USDC and WBTC wallets
 deploy-localhost:
-	@echo "Deploying to LOCALHOST..."
-	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+	@echo "Deploying USDC + WBTC wallets to LOCALHOST..."
+	@forge script script/deployment/07_DeployMultiWallet.s.sol:DeployMultiWalletScript \
 		--sig "run()" \
 		--rpc-url http://localhost:8545 \
 		--broadcast \
@@ -95,9 +96,10 @@ deploy-localhost:
 	@$(MAKE) format-output
 
 # Sepolia deployment (uses keystore for production security)
+# Deploys both USDC and WBTC wallets
 deploy-sepolia:
-	@echo "Deploying to SEPOLIA..."
-	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+	@echo "Deploying USDC + WBTC wallets to SEPOLIA..."
+	@forge script script/deployment/07_DeployMultiWallet.s.sol:DeployMultiWalletScript \
 		--sig "run()" \
 		--rpc-url $${RPC_SEPOLIA} \
 		--broadcast \
@@ -115,7 +117,7 @@ deploy-sepolia:
 # Localhost dry-run (simulates deployment without broadcasting)
 deploy-localhost-dry-run:
 	@echo "Dry-run deployment to LOCALHOST..."
-	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+	@forge script script/deployment/07_DeployMultiWallet.s.sol:DeployMultiWalletScript \
 		--sig "run()" \
 		--rpc-url http://localhost:8545 \
 		--private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
@@ -125,7 +127,7 @@ deploy-localhost-dry-run:
 # Sepolia dry-run (simulates deployment without broadcasting)
 deploy-sepolia-dry-run:
 	@echo "Dry-run deployment to SEPOLIA..."
-	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+	@forge script script/deployment/07_DeployMultiWallet.s.sol:DeployMultiWalletScript \
 		--sig "run()" \
 		--rpc-url $${RPC_SEPOLIA} \
 		--account keyDeployer \
@@ -135,7 +137,7 @@ deploy-sepolia-dry-run:
 # Mainnet dry-run (simulates deployment without broadcasting)
 deploy-mainnet-dry-run:
 	@echo "Dry-run deployment to MAINNET..."
-	@forge script script/deployment/05_DeployAll.s.sol:DeployAllScript \
+	@forge script script/deployment/07_DeployMultiWallet.s.sol:DeployMultiWalletScript \
 		--sig "run()" \
 		--rpc-url $${RPC_MAINNET} \
 		--account keyDeployer \
