@@ -1,0 +1,31 @@
+{
+  "chainId": 11155111,
+  "network": "sepolia",
+  "timestamp": 1768825140,
+  "shared": {
+    "implementation": "0x5Efd602350F7c3FaCC6022C957Fd585694343026",
+    "vaultModule": "0x223eaC38d8416B04E722db052394ce27b45CDeF9",
+    "mockFactory": "0x0000000000000000000000000000000000000000",
+    "mockRegistry": "0x0000000000000000000000000000000000000000"
+  },
+  "wallets": [
+    {
+      "id": "usdc",
+      "asset": "0x028B671ED42278312764195434B21f87Ef8DB422",
+      "proxy": "0x9Cf85135188600Bf53B0654aC7DEEc1E3675E69c",
+      "depositHook": "0x1111bFaf620CBBfD40ba981C7d54220Ba1995BA6",
+      "redeemHook": "0x2BCD9933AA6420a066de91A7B9F9902f792d80E2",
+      "oneInchSwapHook": "0x380468D3d9992554d3c3E9208FA8D7aFEB2CAF1e",
+      "mockAsset": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "id": "wbtc",
+      "asset": "0xBD38b5FB2552d7A79eed19ddA3e7e63dCfC2df9F",
+      "proxy": "0x39169D95AD1cC822C3A2c5ca523DDa7666Cd65FC",
+      "depositHook": "0x6e8aF52d0758A9454A3C889D02Ad43d4B6F357fb",
+      "redeemHook": "0x0C5C6602AB160c3b9A5004C37d005b95134c2c9c",
+      "oneInchSwapHook": "0xb4bcFbB1D85D10923c02B6D8Ce2D912Db7B57D59",
+      "mockAsset": "0x0000000000000000000000000000000000000000"
+    }
+  ]
+}
