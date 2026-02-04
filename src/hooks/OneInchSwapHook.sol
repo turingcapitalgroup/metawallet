@@ -116,6 +116,8 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         bytes swapCalldata;
     }
 
+    /// @notice Deploys the hook and sets the initial owner
+    /// @param _owner The address that will own this hook
     constructor(address _owner) {
         _initializeOwner(_owner);
     }
@@ -125,9 +127,6 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHook
-    /// @param _previousHook The address of the previous hook in the chain
-    /// @param _data Encoded SwapData
-    /// @return _executions Array of executions to perform
     function buildExecutions(
         address _previousHook,
         bytes calldata _data
@@ -277,7 +276,6 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookResult
-    /// @return _outputAmount The amount of destination tokens received from the swap
     function getOutputAmount() external view override returns (uint256 _outputAmount) {
         return _swapContext.amountOut;
     }

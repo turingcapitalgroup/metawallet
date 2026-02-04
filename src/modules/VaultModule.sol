@@ -28,11 +28,16 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /* //////////////////////////////////////////////////////////////
                           STATE & ROLES
     //////////////////////////////////////////////////////////////*/
+    /// @notice Role for vault administration (initialization, configuration)
     uint256 public constant ADMIN_ROLE = _ROLE_0;
+    /// @notice Role for whitelisted depositors
     uint256 public constant WHITELISTED_ROLE = _ROLE_1;
+    /// @notice Role for settlement managers
     uint256 public constant MANAGER_ROLE = _ROLE_4;
+    /// @notice Role for emergency pause/unpause operations
     uint256 public constant EMERGENCY_ADMIN_ROLE = _ROLE_6;
 
+    /// @notice Basis points denominator (10000 = 100%)
     uint256 public constant BPS_DENOMINATOR = 10_000;
 
     // Struct that holds all state for this module, stored at a single unique slot
@@ -64,22 +69,27 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
                           INTERNAL CHECKS
     //////////////////////////////////////////////////////////////*/
 
+    /// @dev Reverts if the vault is currently paused
     function _checkNotPaused() internal view {
         require(!_getVaultModuleStorage().paused, VAULTMODULE_PAUSED);
     }
 
+    /// @dev Reverts if caller does not hold ADMIN_ROLE
     function _checkAdminRole() internal view {
         _checkRoles(ADMIN_ROLE);
     }
 
+    /// @dev Reverts if caller does not hold WHITELISTED_ROLE
     function _checkWhitelistedRole() internal view {
         _checkRoles(WHITELISTED_ROLE);
     }
 
+    /// @dev Reverts if caller does not hold MANAGER_ROLE
     function _checkManagerRole() internal view {
         _checkRoles(MANAGER_ROLE);
     }
 
+    /// @dev Reverts if caller does not hold EMERGENCY_ADMIN_ROLE
     function _checkEmergencyAdminRole() internal view {
         _checkRoles(EMERGENCY_ADMIN_ROLE);
     }
@@ -189,6 +199,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _getVaultModuleStorage().virtualTotalAssets -= assets;
     }
 
+    /// @dev Burns shares from the vault before delegating to ERC7540._withdraw
     function _withdraw(
         uint256 assets,
         uint256 shares,

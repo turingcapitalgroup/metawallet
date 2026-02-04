@@ -446,6 +446,7 @@ abstract contract DeploymentManager is Script {
     {
         for (uint256 i = 0; i < output.wallets.length; i++) {
             if (_strEq(output.wallets[i].id, walletId)) {
+                // forge-lint: disable-next-line(unsafe-typecast)
                 return int256(i);
             }
         }

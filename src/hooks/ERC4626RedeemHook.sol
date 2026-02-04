@@ -87,6 +87,8 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
         uint256 minAssets;
     }
 
+    /// @notice Deploys the hook and sets the initial owner
+    /// @param _owner The address that will own this hook
     constructor(address _owner) {
         _initializeOwner(_owner);
     }
@@ -96,9 +98,6 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHook
-    /// @param _previousHook The address of the previous hook in the chain
-    /// @param _data Encoded RedeemData
-    /// @return _executions Array of executions to perform
     function buildExecutions(
         address _previousHook,
         bytes calldata _data
@@ -222,7 +221,6 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookResult
-    /// @return _outputAmount The amount of assets received from the redemption
     function getOutputAmount() external view override returns (uint256 _outputAmount) {
         return _redeemContext.assetsReceived;
     }

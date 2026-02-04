@@ -85,6 +85,8 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
         uint256 minShares;
     }
 
+    /// @notice Deploys the hook and sets the initial owner
+    /// @param _owner The address that will own this hook
     constructor(address _owner) {
         _initializeOwner(_owner);
     }
@@ -94,9 +96,6 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHook
-    /// @param _previousHook The address of the previous hook in the chain
-    /// @param _data Encoded ApproveAndDepositData
-    /// @return _executions Array of executions to perform
     function buildExecutions(
         address _previousHook,
         bytes calldata _data
@@ -217,7 +216,6 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookResult
-    /// @return _outputAmount The amount of shares received from the deposit
     function getOutputAmount() external view override returns (uint256 _outputAmount) {
         return _depositContext.sharesReceived;
     }

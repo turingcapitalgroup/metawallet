@@ -29,6 +29,7 @@ interface IVaultModule {
     function sharePrice() external view returns (uint256);
 
     /// @notice Returns the current total idle assets (actual balance in vault)
+    /// @return The idle asset balance available for withdrawals
     function totalIdle() external view returns (uint256);
 
     /// @notice Returns the current Merkle Root of strategy assets

@@ -27,15 +27,12 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookExecution
-    /// @param _hookId The unique identifier for the hook
-    /// @param _hookAddress The address of the hook implementation
     function installHook(bytes32 _hookId, address _hookAddress) external {
         _checkAdminRole();
         _installHook(_hookId, _hookAddress);
     }
 
     /// @inheritdoc IHookExecution
-    /// @param _hookId The unique identifier for the hook to uninstall
     function uninstallHook(bytes32 _hookId) external {
         _checkAdminRole();
         _uninstallHook(_hookId);
@@ -46,8 +43,6 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookExecution
-    /// @param _hookExecutions Array of hook executions to perform
-    /// @return _results Results from each hook execution
     function executeWithHookExecution(HookExecution[] calldata _hookExecutions)
         external
         returns (bytes[] memory _results)

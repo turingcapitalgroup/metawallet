@@ -196,14 +196,11 @@ abstract contract HookExecution is IHookExecution {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookExecution
-    /// @param _hookId The hook identifier to query
-    /// @return _hookAddress The address of the hook
     function getHook(bytes32 _hookId) external view returns (address _hookAddress) {
         return _getHook(_hookId);
     }
 
     /// @inheritdoc IHookExecution
-    /// @return _hookIds Array of all installed hook identifiers
     function getInstalledHooks() external view returns (bytes32[] memory _hookIds) {
         return _getInstalledHooks();
     }
