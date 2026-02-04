@@ -17,7 +17,8 @@ import {
     HOOKONEINCH_INSUFFICIENT_OUTPUT,
     HOOKONEINCH_INVALID_HOOK_DATA,
     HOOKONEINCH_INVALID_ROUTER,
-    HOOKONEINCH_PREVIOUS_HOOK_NOT_FOUND
+    HOOKONEINCH_PREVIOUS_HOOK_NOT_FOUND,
+    HOOKONEINCH_ROUTER_NOT_ALLOWED
 } from "metawallet/src/errors/Errors.sol";
 
 /// @title OneInchSwapHook
@@ -30,6 +31,15 @@ import {
 ///      Supports dynamic amounts by reading from previous hook's output
 contract OneInchSwapHook is IHook, IHookResult, Ownable {
     using SafeTransferLib for address;
+
+    /* ///////////////////////////////////////////////////////////////
+                              EVENTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Emitted when a router's whitelist status changes
+    /// @param router The router address
+    /// @param allowed Whether the router is now allowed
+    event RouterAllowedUpdated(address indexed router, bool allowed);
 
     /* ///////////////////////////////////////////////////////////////
                               CONSTANTS
@@ -65,7 +75,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                               STORAGE
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Tracks execution context per caller
+    /// @notice Tracks whether the hook is currently executing
     bool private _executionContext;
 
     /// @notice Stores swap context data for chaining
@@ -75,6 +85,12 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     address private _tempRouter;
     uint256 private _tempValue;
     bytes private _tempSwapCalldata;
+
+    /// @notice Pre-action balance snapshot for delta computation
+    uint256 private _preSwapDstBalance;
+
+    /// @notice Whitelist of allowed router addresses
+    mapping(address => bool) private _allowedRouters;
 
     /* ///////////////////////////////////////////////////////////////
                          HOOK DATA STRUCTURE
@@ -122,29 +138,24 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         onlyOwner
         returns (Execution[] memory _executions)
     {
-        // Decode the hook data
         SwapData memory _swapData = abi.decode(_data, (SwapData));
 
-        // Validate inputs
         require(_swapData.router != address(0), HOOKONEINCH_INVALID_ROUTER);
+        require(_allowedRouters[_swapData.router], HOOKONEINCH_ROUTER_NOT_ALLOWED);
         require(_swapData.srcToken != address(0), HOOKONEINCH_INVALID_HOOK_DATA);
         require(_swapData.dstToken != address(0), HOOKONEINCH_INVALID_HOOK_DATA);
         require(_swapData.receiver != address(0), HOOKONEINCH_INVALID_HOOK_DATA);
         require(_swapData.swapCalldata.length > 0, HOOKONEINCH_INVALID_HOOK_DATA);
 
-        // Determine if using dynamic amount
         bool _useDynamicAmount = _swapData.amountIn == USE_PREVIOUS_HOOK_OUTPUT;
 
         if (_useDynamicAmount) {
-            // Amount will be read from previous hook at execution time
             require(_previousHook != address(0), HOOKONEINCH_PREVIOUS_HOOK_NOT_FOUND);
 
-            // Build execution array with dynamic amount resolution
-            // [resolveDynamicAmount, approve, swap, storeContext, (optional) validate]
+            // [resolveDynamicAmount, approve, swap, resetApproval, (optional) validate]
             uint256 _execCount = _swapData.minAmountOut > 0 ? 5 : 4;
             _executions = new Execution[](_execCount);
 
-            // Execution 0: Get amount from previous hook
             _executions[0] = Execution({
                 target: address(this),
                 value: 0,
@@ -159,52 +170,42 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            // Execution 1: Approve router to spend source tokens (amount resolved at runtime)
             _executions[1] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(this.approveForSwap.selector, _swapData.router)
             });
 
-            // Execution 2: Execute the swap (uses stored context)
             _executions[2] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(this.executeSwap.selector, _swapData.receiver)
             });
 
-            // Execution 3: Store context for next hook
+            // Reset residual approval after swap
             _executions[3] = Execution({
-                target: address(this),
-                value: 0,
-                callData: abi.encodeWithSelector(this.storeSwapContext.selector, _swapData.receiver)
+                target: address(this), value: 0, callData: abi.encodeWithSelector(this.resetSwapApproval.selector)
             });
 
-            // Execution 4 (optional): Validate minimum output received
             if (_swapData.minAmountOut > 0) {
                 _executions[4] = Execution({
                     target: address(this),
                     value: 0,
-                    callData: abi.encodeWithSelector(
-                        this.validateMinOutput.selector, _swapData.dstToken, _swapData.receiver, _swapData.minAmountOut
-                    )
+                    callData: abi.encodeWithSelector(this.validateMinOutput.selector, _swapData.minAmountOut)
                 });
             }
         } else {
-            // Static amount provided
             require(_swapData.amountIn > 0, HOOKONEINCH_INVALID_HOOK_DATA);
 
-            // Check if swapping native ETH (no approval needed)
             bool _isNativeEth = _swapData.srcToken == NATIVE_ETH;
 
-            // Build execution array: [approve (if not ETH), swap, storeContext, (optional) validate]
-            uint256 _baseExecCount = _isNativeEth ? 2 : 3;
+            // [approve (if not ETH), snapshot, swap, resetApproval (if not ETH), storeContext, (optional) validate]
+            uint256 _baseExecCount = _isNativeEth ? 3 : 5;
             uint256 _execCount = _swapData.minAmountOut > 0 ? _baseExecCount + 1 : _baseExecCount;
             _executions = new Execution[](_execCount);
 
             uint256 _idx = 0;
 
-            // Execution: Approve router to spend source tokens (skip for native ETH)
             if (!_isNativeEth) {
                 _executions[_idx++] = Execution({
                     target: _swapData.srcToken,
@@ -213,11 +214,26 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                 });
             }
 
-            // Execution: Execute the swap via 1inch router
+            _executions[_idx++] = Execution({
+                target: address(this),
+                value: 0,
+                callData: abi.encodeWithSelector(
+                    this.snapshotDstBalance.selector, _swapData.dstToken, _swapData.receiver
+                )
+            });
+
             _executions[_idx++] =
                 Execution({ target: _swapData.router, value: _swapData.value, callData: _swapData.swapCalldata });
 
-            // Execution: Store context for next hook
+            // Clear residual approval after swap
+            if (!_isNativeEth) {
+                _executions[_idx++] = Execution({
+                    target: _swapData.srcToken,
+                    value: 0,
+                    callData: abi.encodeWithSelector(IERC20.approve.selector, _swapData.router, uint256(0))
+                });
+            }
+
             _executions[_idx++] = Execution({
                 target: address(this),
                 value: 0,
@@ -230,14 +246,11 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            // Execution (optional): Validate minimum output received
             if (_swapData.minAmountOut > 0) {
                 _executions[_idx] = Execution({
                     target: address(this),
                     value: 0,
-                    callData: abi.encodeWithSelector(
-                        this.validateMinOutput.selector, _swapData.dstToken, _swapData.receiver, _swapData.minAmountOut
-                    )
+                    callData: abi.encodeWithSelector(this.validateMinOutput.selector, _swapData.minAmountOut)
                 });
             }
         }
@@ -252,11 +265,11 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     function finalizeHookContext() external override onlyOwner {
         _executionContext = false;
 
-        // Clean up context data after execution completes
         delete _swapContext;
         delete _tempRouter;
         delete _tempValue;
         delete _tempSwapCalldata;
+        delete _preSwapDstBalance;
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -292,24 +305,29 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         external
         onlyOwner
     {
-        // Get amount from previous hook
         uint256 _amount = IHookResult(_previousHook).getOutputAmount();
         require(_amount > 0, HOOKONEINCH_INVALID_HOOK_DATA);
 
-        // Store temporary context with the resolved amount
         _swapContext = SwapContext({
             srcToken: _srcToken,
             dstToken: _dstToken,
             amountIn: _amount,
-            amountOut: 0, // Will be updated after swap
-            receiver: address(0), // Will be updated after swap
+            amountOut: 0,
+            receiver: address(0),
             timestamp: block.timestamp
         });
 
-        // Store additional data needed for execution
         _tempRouter = _router;
         _tempValue = _value;
         _tempSwapCalldata = _swapCalldata;
+    }
+
+    /// @notice Snapshot the receiver's destination token balance before a static swap
+    /// @dev Called before the router swap execution to enable delta computation
+    /// @param _token The destination token to snapshot
+    /// @param _account The account whose balance to snapshot
+    function snapshotDstBalance(address _token, address _account) external onlyOwner {
+        _preSwapDstBalance = IERC20(_token).balanceOf(_account);
     }
 
     /// @notice Approve the router to spend source tokens (for dynamic amount flow)
@@ -319,27 +337,35 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         (_ctx.srcToken).safeApproveWithRetry(_router, _ctx.amountIn);
     }
 
+    /// @notice Reset the router approval to 0 after a swap (for dynamic amount flow)
+    /// @dev Clears any residual approval from the hook to the router
+    function resetSwapApproval() external onlyOwner {
+        address _srcToken = _swapContext.srcToken;
+        if (_srcToken != NATIVE_ETH) {
+            _srcToken.safeApprove(_tempRouter, 0);
+        }
+    }
+
     /// @notice Execute the swap (for dynamic amount flow)
     /// @dev This function needs the router and swap calldata to be stored first via resolveDynamicAmount
     /// @param _receiver The address to receive the swapped tokens
     function executeSwap(address _receiver) external onlyOwner {
         SwapContext storage _ctx = _swapContext;
 
+        // Snapshot destination token balance before swap for delta computation
+        uint256 _balBefore = IERC20(_ctx.dstToken).balanceOf(_receiver);
+
         // Load router address, value and calldata from storage
         address _router = _tempRouter;
+        require(_allowedRouters[_router], HOOKONEINCH_ROUTER_NOT_ALLOWED);
         uint256 _value = _tempValue;
         bytes memory _calldata = _tempSwapCalldata;
-
-        // Transfer tokens from hook to router (tokens were sent here by previous hook)
-        // Then call the router with pre-built calldata
-        // Note: For dynamic amounts, the swap calldata should use type(uint256).max
-        // and the router will use the approved amount
 
         // Execute the swap - this will pull tokens from this hook via transferFrom
         (bool success,) = _router.call{ value: _value }(_calldata);
         require(success, HOOKONEINCH_INVALID_HOOK_DATA);
 
-        // Update receiver in context
+        _ctx.amountOut = IERC20(_ctx.dstToken).balanceOf(_receiver) - _balBefore;
         _ctx.receiver = _receiver;
     }
 
@@ -347,20 +373,8 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                          CONTEXT MANAGEMENT
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Store swap context after execution (for dynamic amount flow)
-    /// @param _receiver The address that received tokens
-    function storeSwapContext(address _receiver) external onlyOwner {
-        SwapContext storage _ctx = _swapContext;
-
-        // Get actual output amount received
-        uint256 _amountOut = IERC20(_ctx.dstToken).balanceOf(_receiver);
-
-        // Update context with final output
-        _ctx.amountOut = _amountOut;
-        _ctx.receiver = _receiver;
-    }
-
     /// @notice Store swap context after execution (for static amount flow)
+    /// @dev Uses balance delta (current - snapshot) to correctly measure output received
     /// @param _srcToken The source token address
     /// @param _dstToken The destination token address
     /// @param _amountIn The amount of source tokens swapped
@@ -374,10 +388,8 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         external
         onlyOwner
     {
-        // Get actual output amount received
-        uint256 _amountOut = IERC20(_dstToken).balanceOf(_receiver);
+        uint256 _amountOut = IERC20(_dstToken).balanceOf(_receiver) - _preSwapDstBalance;
 
-        // Store context
         _swapContext = SwapContext({
             srcToken: _srcToken,
             dstToken: _dstToken,
@@ -392,21 +404,38 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                          VALIDATION HELPERS
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Validates that the receiver has at least the minimum expected output
-    /// @param _dstToken The destination token to check
-    /// @param _receiver The address to check balance for
+    /// @notice Validates that the swap produced at least the minimum expected output
     /// @param _minAmountOut The minimum expected output amount
-    function validateMinOutput(address _dstToken, address _receiver, uint256 _minAmountOut) external view onlyOwner {
-        uint256 _balance = IERC20(_dstToken).balanceOf(_receiver);
-        require(_balance >= _minAmountOut, HOOKONEINCH_INSUFFICIENT_OUTPUT);
+    function validateMinOutput(uint256 _minAmountOut) external view onlyOwner {
+        require(_swapContext.amountOut >= _minAmountOut, HOOKONEINCH_INSUFFICIENT_OUTPUT);
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         ROUTER MANAGEMENT
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Set whether a router address is allowed for swaps
+    /// @param _router The router address
+    /// @param _allowed Whether the router is allowed
+    function setRouterAllowed(address _router, bool _allowed) external onlyOwner {
+        require(_router != address(0), HOOKONEINCH_INVALID_ROUTER);
+        _allowedRouters[_router] = _allowed;
+        emit RouterAllowedUpdated(_router, _allowed);
+    }
+
+    /// @notice Check if a router address is allowed
+    /// @param _router The router address to check
+    /// @return _allowed Whether the router is allowed
+    function isRouterAllowed(address _router) external view returns (bool _allowed) {
+        return _allowedRouters[_router];
     }
 
     /* ///////////////////////////////////////////////////////////////
                          VIEW FUNCTIONS
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Check if a caller has an active execution context
-    /// @return _hasContext Whether the caller has an active execution context
+    /// @notice Check if the hook has an active execution context
+    /// @return _hasContext Whether there is an active execution context
     function hasActiveContext() external view returns (bool _hasContext) {
         return _executionContext;
     }

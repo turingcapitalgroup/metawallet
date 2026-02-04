@@ -16,6 +16,7 @@ import { ERC4626RedeemHook } from "metawallet/src/hooks/ERC4626RedeemHook.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
 // Local Interfaces
+import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
 import { IERC4626 } from "metawallet/src/interfaces/IERC4626.sol";
 import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
 import { IMetaWallet } from "metawallet/src/interfaces/IMetaWallet.sol";
@@ -25,6 +26,9 @@ import { MockRegistry } from "metawallet/test/helpers/mocks/MockRegistry.sol";
 
 // Errors
 import "metawallet/src/errors/Errors.sol" as Errors;
+
+// Access Control
+import { Ownable } from "solady/auth/Ownable.sol";
 
 contract HookChainTest is BaseTest {
     using SafeTransferLib for address;
@@ -346,6 +350,248 @@ contract HookChainTest is BaseTest {
     }
 
     /* ///////////////////////////////////////////////////////////////
+                    DELTA TRACKING & ACCESS CONTROL TESTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Tests delta tracking via deposit->redeem chain where pre-existing shares
+    ///         would cause old total-balance code to redeem too many shares
+    function test_DepositRedeem_DeltaTracking_PreExistingShares() public {
+        deal(USDC_MAINNET, address(metaWallet), 100_000 * _1_USDC);
+
+        // First deposit to create pre-existing shares
+        uint256 _firstDeposit = 5000 * _1_USDC;
+        _executeDeposit(address(VAULT_A), _firstDeposit, 0);
+
+        uint256 _preExistingShares = VAULT_A.balanceOf(address(metaWallet));
+        assertGt(_preExistingShares, 0, "Should have pre-existing shares");
+
+        // Chain deposit -> redeem(dynamic) where redeem uses deposit output
+        uint256 _secondDeposit = 3000 * _1_USDC;
+
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: address(VAULT_A), assets: _secondDeposit, receiver: address(metaWallet), minShares: 0
+            });
+
+        ERC4626RedeemHook.RedeemData memory _redeemData = ERC4626RedeemHook.RedeemData({
+            vault: address(VAULT_A),
+            shares: type(uint256).max, // USE_PREVIOUS_HOOK_OUTPUT
+            receiver: address(metaWallet),
+            owner: address(metaWallet),
+            minAssets: 0
+        });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](2);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+        _hookExecutions[1] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
+
+        uint256 _usdcBefore = USDC_MAINNET.balanceOf(address(metaWallet));
+
+        vm.prank(users.owner);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
+
+        uint256 _usdcAfter = USDC_MAINNET.balanceOf(address(metaWallet));
+        assertApproxEqAbs(_usdcAfter, _usdcBefore, 2, "Should recover ~same USDC from deposit->redeem chain");
+
+        uint256 _sharesAfter = VAULT_A.balanceOf(address(metaWallet));
+        assertApproxEqAbs(
+            _sharesAfter, _preExistingShares, 1, "Pre-existing shares should remain after chain only redeems new shares"
+        );
+    }
+
+    /// @notice Tests delta tracking in redeem->deposit(dynamic) chain with pre-existing assets
+    function test_RedeemDeposit_DeltaTracking_PreExistingAssets() public {
+        deal(USDC_MAINNET, address(metaWallet), 100_000 * _1_USDC);
+
+        // Deposit to get shares
+        uint256 _depositAmount = 5000 * _1_USDC;
+        _executeDeposit(address(VAULT_A), _depositAmount, 0);
+
+        uint256 _sharesToRedeem = VAULT_A.balanceOf(address(metaWallet));
+        uint256 _preExistingUsdc = USDC_MAINNET.balanceOf(address(metaWallet));
+        assertGt(_preExistingUsdc, 0, "MetaWallet should have pre-existing USDC");
+
+        // Give the depositHook some pre-existing USDC
+        uint256 _preExistingHookUsdc = 10_000 * _1_USDC;
+        deal(USDC_MAINNET, address(depositHook), _preExistingHookUsdc);
+
+        // Chain redeem -> deposit(dynamic)
+        ERC4626RedeemHook.RedeemData memory _redeemData = ERC4626RedeemHook.RedeemData({
+            vault: address(VAULT_A),
+            shares: _sharesToRedeem,
+            receiver: address(depositHook),
+            owner: address(metaWallet),
+            minAssets: 0
+        });
+
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: address(VAULT_A),
+                assets: type(uint256).max, // USE_PREVIOUS_HOOK_OUTPUT
+                receiver: address(metaWallet),
+                minShares: 0
+            });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](2);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
+        _hookExecutions[1] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+
+        vm.prank(users.owner);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
+
+        uint256 _sharesAfter = VAULT_A.balanceOf(address(metaWallet));
+        assertApproxEqAbs(
+            _sharesAfter,
+            _sharesToRedeem,
+            1,
+            "Shares should be approximately restored after redeem->deposit(dynamic) chain"
+        );
+
+        uint256 _hookUsdcAfter = USDC_MAINNET.balanceOf(address(depositHook));
+        assertApproxEqAbs(
+            _hookUsdcAfter,
+            _preExistingHookUsdc,
+            1,
+            "DepositHook's pre-existing USDC should remain since only redeemed amount was deposited"
+        );
+
+        uint256 _metaWalletUsdcAfter = USDC_MAINNET.balanceOf(address(metaWallet));
+        assertEq(_metaWalletUsdcAfter, _preExistingUsdc, "MetaWallet USDC should be unchanged");
+    }
+
+    /// @notice Tests deposit hook slippage validation with realistic minShares
+    function test_DepositHook_SlippageProtection_RealisticMinShares() public {
+        deal(USDC_MAINNET, address(metaWallet), 100_000 * _1_USDC);
+
+        uint256 _amount = 5000 * _1_USDC;
+        uint256 _expectedShares = IERC4626(VAULT_A).previewDeposit(_amount);
+        uint256 _minShares = _expectedShares * 99 / 100;
+
+        _executeDeposit(address(VAULT_A), _amount, _minShares);
+
+        assertFalse(depositHook.hasActiveContext(), "Context should be cleaned up");
+    }
+
+    /// @notice Tests redeem hook slippage validation with realistic minAssets
+    function test_RedeemHook_SlippageProtection_RealisticMinAssets() public {
+        deal(USDC_MAINNET, address(metaWallet), 100_000 * _1_USDC);
+
+        _executeDeposit(address(VAULT_A), 5000 * _1_USDC, 0);
+
+        uint256 _shares = VAULT_A.balanceOf(address(metaWallet));
+        uint256 _expectedAssets = IERC4626(VAULT_A).previewRedeem(_shares);
+        uint256 _minAssets = _expectedAssets * 99 / 100;
+
+        _executeRedeem(address(VAULT_A), _shares, _minAssets);
+
+        assertFalse(redeemHook.hasActiveContext(), "Context should be cleaned up");
+    }
+
+    /// @notice Tests that resolveDynamicAmount cannot be called by non-owner
+    function testRevert_RedeemHook_ResolveDynamicAmount_Unauthorized() public {
+        vm.prank(users.alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        redeemHook.resolveDynamicAmount(address(depositHook), VAULT_A, USDC_MAINNET, users.alice);
+    }
+
+    /// @notice Tests that resolveDynamicAmount access control passes for owner
+    function test_RedeemHook_ResolveDynamicAmount_PassesForOwner() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(abi.encodePacked(Errors.HOOK4626REDEEM_INVALID_HOOK_DATA));
+        redeemHook.resolveDynamicAmount(address(depositHook), VAULT_A, USDC_MAINNET, users.alice);
+    }
+
+    /// @notice Tests a complete deposit->redeem chain using dynamic amounts
+    function test_DepositThenRedeem_DynamicAmounts_RoundTrip() public {
+        deal(USDC_MAINNET, address(metaWallet), 100_000 * _1_USDC);
+
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: address(VAULT_A), assets: 5000 * _1_USDC, receiver: address(metaWallet), minShares: 0
+            });
+
+        ERC4626RedeemHook.RedeemData memory _redeemData = ERC4626RedeemHook.RedeemData({
+            vault: address(VAULT_A),
+            shares: type(uint256).max,
+            receiver: address(metaWallet),
+            owner: address(metaWallet),
+            minAssets: 0
+        });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](2);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+        _hookExecutions[1] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
+
+        uint256 _usdcBefore = USDC_MAINNET.balanceOf(address(metaWallet));
+
+        vm.prank(users.owner);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
+
+        uint256 _usdcAfter = USDC_MAINNET.balanceOf(address(metaWallet));
+        assertApproxEqAbs(_usdcAfter, _usdcBefore, 2, "Should recover almost all USDC");
+    }
+
+    /// @notice Tests that deposit hook context is properly cleaned up after execution
+    function test_ContextCleanup_AfterDepositExecution() public {
+        deal(USDC_MAINNET, address(metaWallet), 100_000 * _1_USDC);
+
+        _executeDeposit(address(VAULT_A), 5000 * _1_USDC, 0);
+
+        assertFalse(depositHook.hasActiveContext(), "Deposit hook context should be cleaned");
+        assertEq(depositHook.getOutputAmount(), 0, "Deposit output should be 0 after cleanup");
+    }
+
+    /// @notice Tests that multiple sequential hook executions don't corrupt state
+    function test_Sequential_DepositRedeemDeposit_NoStateCorruption() public {
+        deal(USDC_MAINNET, address(metaWallet), 100_000 * _1_USDC);
+
+        _executeDeposit(address(VAULT_A), 3000 * _1_USDC, 0);
+        uint256 _sharesAfterFirst = VAULT_A.balanceOf(address(metaWallet));
+        assertGt(_sharesAfterFirst, 0, "Should have shares after first deposit");
+
+        _executeRedeem(address(VAULT_A), _sharesAfterFirst, 0);
+        uint256 _sharesAfterRedeem = VAULT_A.balanceOf(address(metaWallet));
+        assertEq(_sharesAfterRedeem, 0, "Should have no shares after redeem");
+
+        _executeDeposit(address(VAULT_A), 5000 * _1_USDC, 0);
+        uint256 _sharesAfterSecond = VAULT_A.balanceOf(address(metaWallet));
+        assertGt(_sharesAfterSecond, 0, "Should have shares after second deposit");
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                    APPROVAL RESET TESTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice After a deposit->redeem(dynamic) chain, the vault token approval from metaWallet to redeemHook should be 0
+    function test_DynamicRedeem_ApprovalResetAfterExecution() public {
+        // Step 1: Deposit USDC into vault to get shares
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: address(VAULT_A), assets: DEPOSIT_AMOUNT, receiver: address(metaWallet), minShares: 0
+            });
+
+        // Step 2: Redeem shares dynamically (uses previous hook output)
+        ERC4626RedeemHook.RedeemData memory _redeemData = ERC4626RedeemHook.RedeemData({
+            vault: address(VAULT_A),
+            shares: redeemHook.USE_PREVIOUS_HOOK_OUTPUT(), // DYNAMIC
+            receiver: address(metaWallet),
+            owner: address(metaWallet),
+            minAssets: 0
+        });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](2);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+        _hookExecutions[1] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
+
+        vm.prank(users.owner);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
+
+        // Verify the vault token (share token) approval from metaWallet to redeemHook is reset to 0
+        uint256 _allowance = IERC20(VAULT_A).allowance(address(metaWallet), address(redeemHook));
+        assertEq(_allowance, 0, "Vault token approval from metaWallet to redeemHook should be reset to 0");
+    }
+
+    /* ///////////////////////////////////////////////////////////////
                          HELPER FUNCTIONS
     ///////////////////////////////////////////////////////////////*/
 
@@ -355,5 +601,36 @@ contract HookChainTest is BaseTest {
         USDC_MAINNET.safeApprove(_vault, _amount);
         _shares = IERC4626(_vault).deposit(_amount, address(metaWallet));
         vm.stopPrank();
+    }
+
+    /// @notice Helper to execute a deposit via hook execution
+    function _executeDeposit(address _vault, uint256 _amount, uint256 _minShares) internal {
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _data =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: _vault, assets: _amount, receiver: address(metaWallet), minShares: _minShares
+            });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_data) });
+
+        vm.prank(users.owner);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
+    }
+
+    /// @notice Helper to execute a redeem via hook execution
+    function _executeRedeem(address _vault, uint256 _shares, uint256 _minAssets) internal {
+        ERC4626RedeemHook.RedeemData memory _data = ERC4626RedeemHook.RedeemData({
+            vault: _vault,
+            shares: _shares,
+            receiver: address(metaWallet),
+            owner: address(metaWallet),
+            minAssets: _minAssets
+        });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_data) });
+
+        vm.prank(users.owner);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
     }
 }

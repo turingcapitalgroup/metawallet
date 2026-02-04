@@ -9,20 +9,21 @@ import { IVaultModule } from "metawallet/src/interfaces/IVaultModule.sol";
 
 import { ERC7540, SafeTransferLib } from "../lib/ERC7540.sol";
 
+// Local Errors
+import {
+    VAULTMODULE_ALREADY_INITIALIZED,
+    VAULTMODULE_DELTA_EXCEEDS_MAX,
+    VAULTMODULE_INVALID_ASSET_DECIMALS,
+    VAULTMODULE_INVALID_BPS,
+    VAULTMODULE_MISMATCHED_ARRAYS,
+    VAULTMODULE_PAUSED
+} from "metawallet/src/errors/Errors.sol";
+
 /// @title VaultModule
 /// @notice A module for managing vault assets with virtual totalAssets tracking.
 /// All state is stored in a single, unique storage slot to prevent collisions.
 contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     using SafeTransferLib for address;
-
-    /* //////////////////////////////////////////////////////////////
-                          ERRORS
-    //////////////////////////////////////////////////////////////*/
-
-    string constant VAULT_PAUSED = "MW1";
-    string constant MISMATCHED_ARRAYS = "MW2";
-    string constant DELTA_EXCEEDS_MAX = "MW3";
-    string constant INVALID_BPS = "MW4";
 
     /* //////////////////////////////////////////////////////////////
                           STATE & ROLES
@@ -54,7 +55,6 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @notice Returns a pointer to the module's storage struct at its unique slot.
     function _getVaultModuleStorage() internal pure returns (VaultModuleStorage storage $) {
         bytes32 _slot = VAULT_MODULE_STORAGE_LOCATION;
-        // Use assembly to load the storage pointer from the fixed slot
         assembly {
             $.slot := _slot
         }
@@ -65,7 +65,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     //////////////////////////////////////////////////////////////*/
 
     function _checkNotPaused() internal view {
-        require(!_getVaultModuleStorage().paused, VAULT_PAUSED);
+        require(!_getVaultModuleStorage().paused, VAULTMODULE_PAUSED);
     }
 
     function _checkAdminRole() internal view {
@@ -88,13 +88,12 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     function initializeVault(address _asset, string memory _name, string memory _symbol) external {
         _checkAdminRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
-        if ($.initialized) revert();
+        require(!$.initialized, VAULTMODULE_ALREADY_INITIALIZED);
         $.asset = _asset;
         $.name = _name;
         $.symbol = _symbol;
-        // Try to get asset decimals, revert if unsuccessful
         (bool success, uint8 result) = _tryGetAssetDecimals(_asset);
-        if (!success) revert();
+        require(success, VAULTMODULE_INVALID_ASSET_DECIMALS);
         $.decimals = result;
         $.initialized = true;
     }
@@ -103,11 +102,8 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
                          ERC7540 Logic
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Transfers assets from sender into the Vault and submits a Request for asynchronous deposit.
-    /// @param assets the amount of deposit assets to transfer from owner
-    /// @param controller the controller of the request who will be able to operate the request
-    /// @param owner the owner of the shares to be deposited
-    /// @return requestId
+    /// @inheritdoc ERC7540
+    /// @dev Immediately fulfills the deposit request after submission.
     function requestDeposit(
         uint256 assets,
         address controller,
@@ -121,87 +117,75 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _checkNotPaused();
         if (owner != msg.sender) revert InvalidOperator();
         requestId = super.requestDeposit(assets, controller, owner);
-        // fulfill the request directly
         _fulfillDepositRequest(controller, assets, convertToShares(assets));
     }
 
-    /// @dev Override deposit to add pause check
+    /// @inheritdoc ERC7540
+    /// @dev Updates virtualTotalAssets to track deposited assets.
     function deposit(uint256 assets, address receiver) public override returns (uint256 shares) {
         _checkNotPaused();
         shares = super.deposit(assets, receiver, msg.sender);
-        // Increase virtual total assets when shares are minted
         _getVaultModuleStorage().virtualTotalAssets += assets;
     }
 
-    /// @dev Override deposit with controller to update virtualTotalAssets
+    /// @inheritdoc ERC7540
+    /// @dev Updates virtualTotalAssets to track deposited assets.
     function deposit(uint256 assets, address receiver, address controller) public override returns (uint256 shares) {
         _checkNotPaused();
         shares = super.deposit(assets, receiver, controller);
-        // Increase virtual total assets when shares are minted
         _getVaultModuleStorage().virtualTotalAssets += assets;
     }
 
-    /// @dev Override mint to add pause check
+    /// @inheritdoc ERC7540
     function mint(uint256 shares, address receiver) public override returns (uint256 assets) {
         _checkNotPaused();
         return mint(shares, receiver, msg.sender);
     }
 
-    /// @dev Override mint with controller to update virtualTotalAssets
+    /// @inheritdoc ERC7540
+    /// @dev Updates virtualTotalAssets to track minted assets.
     function mint(uint256 shares, address receiver, address controller) public override returns (uint256 assets) {
         _checkNotPaused();
         assets = super.mint(shares, receiver, controller);
-        // Increase virtual total assets when shares are minted
         _getVaultModuleStorage().virtualTotalAssets += assets;
     }
 
-    /// @dev The redeem amount is limited by the claimable redeem requests of the user
+    /// @inheritdoc ERC7540
+    /// @dev Limited by both idle assets and pending redeem requests.
     function maxRedeem(address owner) public view override returns (uint256 shares) {
         uint256 _totalIdleShares = convertToShares(totalIdle());
         uint256 pendingShares = super.pendingRedeemRequest(owner);
         return _totalIdleShares >= pendingShares ? pendingShares : _totalIdleShares;
     }
 
-    /// @notice Returns the pending redemption request amount for a controller
-    /// @param controller Address to check pending redemption for
-    /// @return Amount of shares pending redemption
+    /// @inheritdoc ERC7540
+    /// @dev Subtracts claimable shares from the total pending amount.
     function pendingRedeemRequest(address controller) public view override returns (uint256) {
         uint256 pending = super.pendingRedeemRequest(controller);
-        // substract claimable shares
         return pending - maxRedeem(controller);
     }
 
-    /// @notice Claims processed redemption request
-    /// @dev Can only be called by controller or approved operator
-    /// @param shares Amount of shares to redeem
-    /// @param to Address to receive the assets
-    /// @param controller Controller of the redemption request
-    /// @return assets Amount of assets returned
+    /// @inheritdoc ERC7540
+    /// @dev Updates virtualTotalAssets to track withdrawn assets.
     function redeem(uint256 shares, address to, address controller) public virtual override returns (uint256 assets) {
         _checkNotPaused();
+        _validateController(controller);
         if (shares > maxRedeem(controller)) revert RedeemMoreThanMax();
         assets = convertToAssets(shares);
         _fulfillRedeemRequest(shares, assets, controller, true);
-        _validateController(controller);
         (assets,) = _withdraw(assets, shares, to, controller);
-        // Decrease virtual total assets when assets are withdrawn
         _getVaultModuleStorage().virtualTotalAssets -= assets;
     }
 
-    /// @notice Claims processed redemption request for exact assets
-    /// @dev Can only be called by controller or approved operator
-    /// @param assets Exact amount of assets to withdraw
-    /// @param to Address to receive the assets
-    /// @param controller Controller of the redemption request
-    /// @return shares Amount of shares burned
+    /// @inheritdoc ERC7540
+    /// @dev Updates virtualTotalAssets to track withdrawn assets.
     function withdraw(uint256 assets, address to, address controller) public virtual override returns (uint256 shares) {
         _checkNotPaused();
-        if (assets > maxWithdraw(controller)) revert WithdrawMoreThanMax();
-        shares = convertToAssets(assets);
-        _fulfillRedeemRequest(shares, assets, controller, true);
         _validateController(controller);
+        if (assets > maxWithdraw(controller)) revert WithdrawMoreThanMax();
+        shares = convertToShares(assets);
+        _fulfillRedeemRequest(shares, assets, controller, true);
         (, shares) = _withdraw(assets, shares, to, controller);
-        // Decrease virtual total assets when assets are withdrawn
         _getVaultModuleStorage().virtualTotalAssets -= assets;
     }
 
@@ -215,7 +199,6 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         override
         returns (uint256 assetsReturn, uint256 sharesReturn)
     {
-        // burn shares to instantly fulfill request
         _burn(address(this), shares);
         return super._withdraw(assets, shares, receiver, controller);
     }
@@ -249,15 +232,18 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         return convertToAssets(10 ** decimals());
     }
 
-    /// @notice Returns the virtual total assets of the vault.
-    /// @return _assets The virtual total assets (updated on deposit/redeem)
+    /// @inheritdoc ERC7540
+    /// @dev Returns virtualTotalAssets rather than actual balance, updated on deposit/redeem/settlement.
     function totalAssets() public view override returns (uint256 _assets) {
         return _getVaultModuleStorage().virtualTotalAssets;
     }
 
     /// @inheritdoc IVaultModule
     function totalIdle() public view returns (uint256) {
-        return asset().balanceOf(address(this)) - totalPendingDepositRequests();
+        uint256 _balance = asset().balanceOf(address(this));
+        uint256 _pending = totalPendingDepositRequests();
+        if (_balance <= _pending) return 0;
+        return _balance - _pending;
     }
 
     /// @inheritdoc IVaultModule
@@ -278,7 +264,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @inheritdoc IVaultModule
     function setMaxAllowedDelta(uint256 _maxAllowedDelta) external {
         _checkAdminRole();
-        require(_maxAllowedDelta <= BPS_DENOMINATOR, INVALID_BPS);
+        require(_maxAllowedDelta <= BPS_DENOMINATOR, VAULTMODULE_INVALID_BPS);
         _getVaultModuleStorage().maxAllowedDelta = _maxAllowedDelta;
         emit MaxAllowedDeltaUpdated(_maxAllowedDelta);
     }
@@ -292,7 +278,6 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _checkManagerRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
 
-        // Validate delta if maxAllowedDelta is set (non-zero)
         uint256 _maxDelta = $.maxAllowedDelta;
         if (_maxDelta > 0) {
             uint256 _currentTotalAssets = $.virtualTotalAssets;
@@ -301,7 +286,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
                     ? _newTotalAssets - _currentTotalAssets
                     : _currentTotalAssets - _newTotalAssets;
                 uint256 _deltaBps = (_delta * BPS_DENOMINATOR) / _currentTotalAssets;
-                require(_deltaBps <= _maxDelta, DELTA_EXCEEDS_MAX);
+                require(_deltaBps <= _maxDelta, VAULTMODULE_DELTA_EXCEEDS_MAX);
             }
         }
 
@@ -344,7 +329,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         returns (bytes32)
     {
         uint256 _l = _strategies.length;
-        require(_l == _values.length, MISMATCHED_ARRAYS);
+        require(_l == _values.length, VAULTMODULE_MISMATCHED_ARRAYS);
 
         bytes32[] memory _leaves = new bytes32[](_l);
         for (uint256 _i; _i < _l; ++_i) {
