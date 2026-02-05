@@ -43,6 +43,7 @@ solady = "0.1.26"
 minimal-smart-account = { version = "1.0", git = "https://github.com/turingcapitalgroup/minimal-smart-account.git"}
 forge-std = "1.11.0"
 kam = { version = "1.0", git = "https://github.com/turingcapitalgroup/kam.git" }
+minimal-uups-factory = { version = "1.0.0", git = "https://github.com/turingcapitalgroup/minimal-uups-factory.git", rev = "f484679b34fc4ffe4f394bb3b9417e81d462fa8c" }
 
 [soldeer]
 # whether soldeer manages remappings

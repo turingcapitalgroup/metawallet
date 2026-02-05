@@ -4,15 +4,15 @@ pragma solidity ^0.8.19;
 import { BaseTest } from "./BaseTest.t.sol";
 
 // Protocol contracts
-import { MetaWallet } from "metawallet/src/MetaWallet.sol";
+import { MetaWallet, MinimalSmartAccount } from "metawallet/src/MetaWallet.sol";
 import { ERC4626ApproveAndDepositHook } from "metawallet/src/hooks/ERC4626ApproveAndDepositHook.sol";
 import { ERC4626RedeemHook } from "metawallet/src/hooks/ERC4626RedeemHook.sol";
 import { OneInchSwapHook } from "metawallet/src/hooks/OneInchSwapHook.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
 // External dependencies
-import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
 import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 
 // Mock contracts
 import { MockRegistry } from "metawallet/test/helpers/mocks/MockRegistry.sol";
@@ -77,7 +77,7 @@ contract DeploymentBaseTest is BaseTest {
 
     MetaWallet public implementation;
     VaultModule public vaultModule;
-    MinimalSmartAccountFactory public factory;
+    MinimalUUPSFactory public factory;
     MockRegistry public registry;
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -151,7 +151,7 @@ contract DeploymentBaseTest is BaseTest {
         registry = new MockRegistry();
 
         // Deploy factory
-        factory = new MinimalSmartAccountFactory();
+        factory = new MinimalUUPSFactory();
 
         // Deploy implementation
         implementation = new MetaWallet();
@@ -193,11 +193,13 @@ contract DeploymentBaseTest is BaseTest {
         bytes32 fullSalt =
             bytes32(uint256(uint160(address(users.owner))) << 96) | (salt & bytes32(uint256(type(uint96).max)));
 
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+        address predictedAddress = factory.predictDeterministicAddress(address(implementation), fullSalt);
 
-        address proxy = factory.deployDeterministic(
-            address(implementation), fullSalt, users.owner, IRegistry(address(registry)), id
+        bytes memory initData = abi.encodeWithSelector(
+            MinimalSmartAccount.initialize.selector, users.owner, IRegistry(address(registry)), id
         );
+
+        address proxy = factory.deployDeterministicAndCall(address(implementation), fullSalt, initData);
 
         require(proxy == predictedAddress, "Address mismatch!");
         wallet.proxy = MetaWallet(payable(proxy));

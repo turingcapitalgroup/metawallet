@@ -3,11 +3,11 @@ pragma solidity ^0.8.20;
 
 import { Script, console } from "forge-std/Script.sol";
 
-import { MetaWallet } from "metawallet/src/MetaWallet.sol";
+import { MetaWallet, MinimalSmartAccount } from "metawallet/src/MetaWallet.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
-import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
 import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 
 import { DeploymentManager } from "../utils/DeploymentManager.sol";
 
@@ -42,21 +42,19 @@ contract DeployProxyScript is Script, DeploymentManager {
         bytes32 fullSalt =
             bytes32(uint256(uint160(msg.sender)) << 96) | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
 
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(factoryAddr);
+        MinimalUUPSFactory factory = MinimalUUPSFactory(factoryAddr);
 
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+        address predictedAddress = factory.predictDeterministicAddress(existing.contracts.implementation, fullSalt);
         console.log("Predicted proxy address:", predictedAddress);
+
+        bytes memory initData = abi.encodeWithSelector(
+            MinimalSmartAccount.initialize.selector, config.roles.owner, IRegistry(registryAddr), config.vault.accountId
+        );
 
         vm.startBroadcast();
 
         // Deploy proxy
-        proxy = factory.deployDeterministic(
-            existing.contracts.implementation,
-            fullSalt,
-            config.roles.owner,
-            IRegistry(registryAddr),
-            config.vault.accountId
-        );
+        proxy = factory.deployDeterministicAndCall(existing.contracts.implementation, fullSalt, initData);
         writeContractAddress("proxy", proxy);
         console.log("[1/3] Proxy deployed:", proxy);
 

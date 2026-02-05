@@ -3,4 +3,5 @@ kam/=dependencies/kam-1.0/src/
 metawallet/src/=src/
 metawallet/test/=test/
 minimal-smart-account/=dependencies/minimal-smart-account-1.0/src/
+minimal-uups-factory/=dependencies/minimal-uups-factory-1.0.0/src/
 solady/=dependencies/solady-0.1.26/src/

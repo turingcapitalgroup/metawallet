@@ -3,14 +3,14 @@ pragma solidity ^0.8.20;
 
 import { Script } from "forge-std/Script.sol";
 
-import { MetaWallet } from "metawallet/src/MetaWallet.sol";
+import { MetaWallet, MinimalSmartAccount } from "metawallet/src/MetaWallet.sol";
 import { ERC4626ApproveAndDepositHook } from "metawallet/src/hooks/ERC4626ApproveAndDepositHook.sol";
 import { ERC4626RedeemHook } from "metawallet/src/hooks/ERC4626RedeemHook.sol";
 import { OneInchSwapHook } from "metawallet/src/hooks/OneInchSwapHook.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
-import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
 import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 
 import { MockERC20, MockRegistry } from "../helpers/MockContracts.sol";
 import { DeploymentManager } from "../utils/DeploymentManager.sol";
@@ -94,7 +94,7 @@ contract DeployMultiWalletScript is Script, DeploymentManager {
             factory = output.shared.mockFactory;
             _log("[SHARED] Using existing mock factory:", factory);
         } else {
-            MinimalSmartAccountFactory mockFactory = new MinimalSmartAccountFactory();
+            MinimalUUPSFactory mockFactory = new MinimalUUPSFactory();
             factory = address(mockFactory);
             output.shared.mockFactory = factory;
             _log("[SHARED] Mock factory deployed:", factory);
@@ -172,13 +172,14 @@ contract DeployMultiWalletScript is Script, DeploymentManager {
         bytes32 fullSalt =
             bytes32(uint256(uint160(msg.sender)) << 96) | (walletConfig.salt & bytes32(uint256(type(uint96).max)));
 
-        MinimalSmartAccountFactory factoryContract = MinimalSmartAccountFactory(factory);
-        address predictedAddress = factoryContract.predictDeterministicAddress(fullSalt);
+        MinimalUUPSFactory factoryContract = MinimalUUPSFactory(factory);
+        address predictedAddress = factoryContract.predictDeterministicAddress(shared.implementation, fullSalt);
         _log("Predicted proxy address:", predictedAddress);
 
-        proxy = factoryContract.deployDeterministic(
-            shared.implementation, fullSalt, config.roles.owner, IRegistry(registry), walletConfig.id
+        bytes memory initData = abi.encodeWithSelector(
+            MinimalSmartAccount.initialize.selector, config.roles.owner, IRegistry(registry), walletConfig.id
         );
+        proxy = factoryContract.deployDeterministicAndCall(shared.implementation, fullSalt, initData);
         _log("Proxy deployed:", proxy);
 
         require(proxy == predictedAddress, "Address mismatch!");
