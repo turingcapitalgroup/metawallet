@@ -2,21 +2,34 @@
   "network": "sepolia",
   "chainId": 11155111,
   "roles": {
-    "owner": "0x0000000000000000000000000000000000000000",
-    "deployer": "0x0000000000000000000000000000000000000000"
+    "owner": "0x11D5E7dBA0658cAE21BEAA6a1719975cB233A81E",
+    "deployer": "0x11D5E7dBA0658cAE21BEAA6a1719975cB233A81E"
   },
-  "external": {
-    "factory": "0x0000000000000000000000000000000000000000",
-    "registry": "0x0000000000000000000000000000000000000000",
-    "asset": "0x0000000000000000000000000000000000000000"
-  },
-  "vault": {
-    "name": "Meta Vault",
-    "symbol": "mVAULT",
-    "accountId": "metawallet.v1"
+  "shared": {
+    "factory": "0x283422Af0f48f120095384F7326C5b9f8C904cd6",
+    "registry": "0x6e4FAD79f8778D3C8Dc9693830Af552bB7d5e6cF"
   },
   "deployment": {
-    "salt": "0x0000000000000000000000000000000000000000000000000000000000000000",
-    "deployMockAssets": true
-  }
+    "deployMockAssets": false
+  },
+  "wallets": [
+    {
+      "id": "usdc",
+      "asset": "0x028B671ED42278312764195434B21f87Ef8DB422",
+      "vault": {
+        "name": "Meta Vault USDC",
+        "symbol": "mwUSDC"
+      },
+      "salt": "0x0000000000000000000000000000000000000000000000000000000000001001"
+    },
+    {
+      "id": "wbtc",
+      "asset": "0xBD38b5FB2552d7A79eed19ddA3e7e63dCfC2df9F",
+      "vault": {
+        "name": "Meta Vault WBTC",
+        "symbol": "mwBTC"
+      },
+      "salt": "0x0000000000000000000000000000000000000000000000000000000000001002"
+    }
+  ]
 }

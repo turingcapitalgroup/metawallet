@@ -1,25 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @title IHookExecution
+/// @notice Interface for installing, uninstalling, and executing hooks
 interface IHookExecution {
-    /* ///////////////////////////////////////////////////////////////
+    /* //////////////////////////////////////////////////////////////
                                 EVENTS
-    ///////////////////////////////////////////////////////////////*/
+    //////////////////////////////////////////////////////////////*/
 
+    /// @notice Emitted when a hook is installed
     event HookInstalled(bytes32 indexed hookId, address indexed hook);
+    /// @notice Emitted when a hook is uninstalled
     event HookUninstalled(bytes32 indexed hookId, address indexed hook);
+    /// @notice Emitted when hook execution begins
     event HookExecutionStarted(bytes32 indexed hookId, address indexed hook);
+    /// @notice Emitted when hook execution completes
     event HookExecutionCompleted(bytes32 indexed hookId, address indexed hook);
-
-    /* ///////////////////////////////////////////////////////////////
-                               ERRORS
-    ///////////////////////////////////////////////////////////////*/
-
-    error HookNotInstalled(bytes32 hookId);
-    error HookAlreadyInstalled(bytes32 hookId);
-    error InvalidHookAddress();
-    error HookExecutionFailed(bytes32 hookId, string reason);
-    error EmptyHookChain();
 
     /// @notice Configuration for a hook execution
     /// @param hookId Unique identifier for the hook

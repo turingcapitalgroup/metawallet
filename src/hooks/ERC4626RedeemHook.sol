@@ -59,12 +59,15 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
                               STORAGE
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Tracks execution context per caller
+    /// @notice Tracks whether the hook is currently executing
     bool private _executionContext;
 
-    /// @notice Stores redeem context data for each caller
+    /// @notice Stores redeem context data for the current execution
     /// @dev This allows subsequent hooks to access redemption details
     RedeemContext private _redeemContext;
+
+    /// @notice Pre-action balance snapshot for delta computation (used in static flow)
+    uint256 private _preActionBalance;
 
     /* ///////////////////////////////////////////////////////////////
                          HOOK DATA STRUCTURE
@@ -84,6 +87,8 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
         uint256 minAssets;
     }
 
+    /// @notice Deploys the hook and sets the initial owner
+    /// @param _owner The address that will own this hook
     constructor(address _owner) {
         _initializeOwner(_owner);
     }
@@ -93,9 +98,6 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHook
-    /// @param _previousHook The address of the previous hook in the chain
-    /// @param _data Encoded RedeemData
-    /// @return _executions Array of executions to perform
     function buildExecutions(
         address _previousHook,
         bytes calldata _data
@@ -106,30 +108,23 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
         onlyOwner
         returns (Execution[] memory _executions)
     {
-        // Decode the hook data
         RedeemData memory _redeemData = abi.decode(_data, (RedeemData));
 
-        // Validate inputs
         require(_redeemData.vault != address(0), HOOK4626REDEEM_INVALID_HOOK_DATA);
         require(_redeemData.receiver != address(0), HOOK4626REDEEM_INVALID_HOOK_DATA);
         require(_redeemData.owner != address(0), HOOK4626REDEEM_INVALID_HOOK_DATA);
 
-        // Get the underlying asset from the vault
         address _asset = IERC4626(_redeemData.vault).asset();
 
-        // Determine if using dynamic amount
         bool _useDynamicAmount = _redeemData.shares == USE_PREVIOUS_HOOK_OUTPUT;
 
         if (_useDynamicAmount) {
-            // Amount will be read from previous hook at execution time
             require(_previousHook != address(0), HOOK4626REDEEM_PREVIOUS_HOOK_NO_OUTPUT);
 
-            // Build execution array with dynamic amount resolution
-            // [getDynamicAmount, redeem, storeContext, (optional) validate]
+            // [getDynamicAmount, approve, redeem, resetApproval, (optional) validate]
             uint256 _execCount = _redeemData.minAssets > 0 ? 5 : 4;
             _executions = new Execution[](_execCount);
 
-            // Execution 0: Get amount from previous hook
             _executions[0] = Execution({
                 target: address(this),
                 value: 0,
@@ -138,47 +133,46 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            // Execution 1: Approve vault shares to hook
             _executions[1] = Execution({
-                target: _redeemData.vault, // vault address
+                target: _redeemData.vault,
                 value: 0,
                 callData: abi.encodeWithSelector(IERC20.approve.selector, address(this), _redeemData.shares)
             });
 
-            // Execution 2: Redeem shares from vault (amount will be resolved at runtime)
             _executions[2] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(this.executeRedeem.selector, _redeemData.receiver)
             });
 
-            // Execution 3: Store context for next hook
+            // Clear unlimited approval after use
             _executions[3] = Execution({
-                target: address(this),
+                target: _redeemData.vault,
                 value: 0,
-                callData: abi.encodeWithSelector(this.storeRedeemContext.selector, _redeemData.receiver)
+                callData: abi.encodeWithSelector(IERC20.approve.selector, address(this), uint256(0))
             });
 
-            // Execution 4 (optional): Validate minimum assets received
             if (_redeemData.minAssets > 0) {
                 _executions[4] = Execution({
                     target: address(this),
                     value: 0,
-                    callData: abi.encodeWithSelector(
-                        this.validateMinAssets.selector, _asset, _redeemData.receiver, _redeemData.minAssets
-                    )
+                    callData: abi.encodeWithSelector(this.validateMinAssets.selector, _redeemData.minAssets)
                 });
             }
         } else {
-            // Static amount provided
             require(_redeemData.shares > 0, HOOK4626REDEEM_INVALID_HOOK_DATA);
 
-            // Build execution array: [redeem, storeContext, (optional) validate]
-            uint256 _execCount = _redeemData.minAssets > 0 ? 3 : 2;
+            // [snapshot, redeem, storeContext, (optional) validate]
+            uint256 _execCount = _redeemData.minAssets > 0 ? 4 : 3;
             _executions = new Execution[](_execCount);
 
-            // Execution 0: Redeem shares from vault
             _executions[0] = Execution({
+                target: address(this),
+                value: 0,
+                callData: abi.encodeWithSelector(this.snapshotBalance.selector, _asset, _redeemData.receiver)
+            });
+
+            _executions[1] = Execution({
                 target: _redeemData.vault,
                 value: 0,
                 callData: abi.encodeWithSelector(
@@ -186,8 +180,7 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            // Execution 1: Store context for next hook
-            _executions[1] = Execution({
+            _executions[2] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
@@ -200,14 +193,11 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            // Execution 2 (optional): Validate minimum assets received
             if (_redeemData.minAssets > 0) {
-                _executions[2] = Execution({
+                _executions[3] = Execution({
                     target: address(this),
                     value: 0,
-                    callData: abi.encodeWithSelector(
-                        this.validateMinAssets.selector, _asset, _redeemData.receiver, _redeemData.minAssets
-                    )
+                    callData: abi.encodeWithSelector(this.validateMinAssets.selector, _redeemData.minAssets)
                 });
             }
         }
@@ -222,8 +212,8 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     function finalizeHookContext() external override onlyOwner {
         _executionContext = false;
 
-        // Clean up context data after execution completes
         delete _redeemContext;
+        delete _preActionBalance;
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -231,7 +221,6 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookResult
-    /// @return _outputAmount The amount of assets received from the redemption
     function getOutputAmount() external view override returns (uint256 _outputAmount) {
         return _redeemContext.assetsReceived;
     }
@@ -246,50 +235,56 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     /// @param _vault The vault address (stored for later use)
     /// @param _asset The asset address (stored for later use)
     /// @param _owner The owner of the shares (stored for later use)
-    function resolveDynamicAmount(address _previousHook, address _vault, address _asset, address _owner) external {
-        // Get amount from previous hook
+    function resolveDynamicAmount(
+        address _previousHook,
+        address _vault,
+        address _asset,
+        address _owner
+    )
+        external
+        onlyOwner
+    {
         uint256 _amount = IHookResult(_previousHook).getOutputAmount();
         require(_amount > 0, HOOK4626REDEEM_INVALID_HOOK_DATA);
 
-        // Store temporary context with the resolved amount
         _redeemContext = RedeemContext({
             vault: _vault,
             asset: _asset,
             sharesRedeemed: _amount,
-            assetsReceived: 0, // Will be updated after redeem
-            receiver: address(0), // Will be updated after redeem
+            assetsReceived: 0,
+            receiver: address(0),
             owner: _owner,
             timestamp: block.timestamp
         });
     }
 
+    /// @notice Snapshot the receiver's asset balance before a static redeem
+    /// @dev Called before the vault.redeem() execution to enable delta computation
+    /// @param _token The asset token to snapshot
+    /// @param _account The account whose balance to snapshot
+    function snapshotBalance(address _token, address _account) external onlyOwner {
+        _preActionBalance = IERC20(_token).balanceOf(_account);
+    }
+
     /// @notice Execute the redemption (for dynamic amount flow)
+    /// @dev Uses balance delta to measure assets received instead of trusting return value
     /// @param _receiver The address to receive the assets
     function executeRedeem(address _receiver) external onlyOwner {
         RedeemContext storage _ctx = _redeemContext;
+        uint256 _assetsBefore = IERC20(_ctx.asset).balanceOf(_receiver);
         IERC4626(_ctx.vault).redeem(_ctx.sharesRedeemed, _receiver, _ctx.owner);
+        uint256 _assets = IERC20(_ctx.asset).balanceOf(_receiver) - _assetsBefore;
         _ctx.receiver = _receiver;
+        _ctx.assetsReceived = _assets;
     }
 
     /* ///////////////////////////////////////////////////////////////
                          CONTEXT MANAGEMENT
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Store redeem context after execution (for dynamic amount flow)
-    /// @dev Called as part of the execution chain to save final context
-    /// @param _receiver The address that received assets
-    function storeRedeemContext(address _receiver) external onlyOwner {
-        RedeemContext storage _ctx = _redeemContext;
-
-        // Get actual assets received
-        uint256 _assetsReceived = IERC20(_ctx.asset).balanceOf(_receiver);
-
-        // Update context with final assets
-        _ctx.assetsReceived = _assetsReceived;
-    }
-
     /// @notice Store redeem context after execution (for static amount flow)
     /// @dev Called as part of the execution chain to save context for next hook
+    /// @dev Uses balance delta (current - snapshot) to correctly measure assets received
     /// @param _vault The vault address
     /// @param _asset The underlying asset address
     /// @param _sharesRedeemed The amount of shares redeemed
@@ -305,10 +300,8 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
         external
         onlyOwner
     {
-        // Get actual assets received
-        uint256 _assetsReceived = IERC20(_asset).balanceOf(_receiver);
+        uint256 _assetsReceived = IERC20(_asset).balanceOf(_receiver) - _preActionBalance;
 
-        // Store context
         _redeemContext = RedeemContext({
             vault: _vault,
             asset: _asset,
@@ -324,29 +317,24 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
                          VALIDATION HELPERS
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Validates that the receiver has at least the minimum expected assets
+    /// @notice Validates that the redemption produced at least the minimum expected assets
     /// @dev This function is called as part of the execution chain for slippage protection
-    /// @param _asset The asset token address
-    /// @param _receiver The address to check balance for
     /// @param _minAssets The minimum expected assets
-    function validateMinAssets(address _asset, address _receiver, uint256 _minAssets) external view onlyOwner {
-        uint256 _balance = IERC20(_asset).balanceOf(_receiver);
-        require(_balance >= _minAssets, HOOK4626REDEEM_INSUFFICIENT_ASSETS);
+    function validateMinAssets(uint256 _minAssets) external view onlyOwner {
+        require(_redeemContext.assetsReceived >= _minAssets, HOOK4626REDEEM_INSUFFICIENT_ASSETS);
     }
 
     /* ///////////////////////////////////////////////////////////////
                          VIEW FUNCTIONS
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Check if a caller has an active execution context
-    /// @return _hasContext Whether the caller has an active execution context
+    /// @notice Check if the hook has an active execution context
+    /// @return _hasContext Whether there is an active execution context
     function hasActiveContext() external view returns (bool _hasContext) {
         return _executionContext;
     }
 
-    /// @notice Get the stored redeem context for a caller
-    /// @dev Returns the context from the last redeem operation
-    /// @dev This allows subsequent hooks to access redemption information
+    /// @notice Get the stored redeem context
     /// @return _context The stored redeem context
     function getRedeemContext() external view returns (RedeemContext memory _context) {
         return _redeemContext;

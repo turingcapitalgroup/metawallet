@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import { Script } from "forge-std/Script.sol";
 
-import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 
 import { MockERC20, MockRegistry } from "../helpers/MockContracts.sol";
 import { DeploymentManager } from "../utils/DeploymentManager.sol";
@@ -57,7 +57,7 @@ contract DeployMockAssetsScript is Script, DeploymentManager {
         _log("Mock Registry deployed:", assets.registry);
 
         // Deploy factory
-        MinimalSmartAccountFactory mockFactory = new MinimalSmartAccountFactory();
+        MinimalUUPSFactory mockFactory = new MinimalUUPSFactory();
         assets.factory = address(mockFactory);
         if (writeToJson) {
             writeContractAddress("mockFactory", assets.factory);

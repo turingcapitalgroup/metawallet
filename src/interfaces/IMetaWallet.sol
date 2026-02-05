@@ -6,4 +6,6 @@ import { IHookExecution } from "./IHookExecution.sol";
 import { IVaultModule } from "./IVaultModule.sol";
 import { IMinimalSmartAccount } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
 
+/// @title IMetaWallet
+/// @notice Composite interface for the MetaWallet smart wallet
 interface IMetaWallet is IERC7540, IVaultModule, IMinimalSmartAccount, IHookExecution { }

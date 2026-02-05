@@ -4,15 +4,15 @@ pragma solidity ^0.8.19;
 import { BaseTest } from "./BaseTest.t.sol";
 
 // Protocol contracts
-import { MetaWallet } from "metawallet/src/MetaWallet.sol";
+import { MetaWallet, MinimalSmartAccount } from "metawallet/src/MetaWallet.sol";
 import { ERC4626ApproveAndDepositHook } from "metawallet/src/hooks/ERC4626ApproveAndDepositHook.sol";
 import { ERC4626RedeemHook } from "metawallet/src/hooks/ERC4626RedeemHook.sol";
 import { OneInchSwapHook } from "metawallet/src/hooks/OneInchSwapHook.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
 // External dependencies
-import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
 import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 
 // Mock contracts
 import { MockRegistry } from "metawallet/test/helpers/mocks/MockRegistry.sol";
@@ -21,7 +21,7 @@ import { ERC20 } from "solady/tokens/ERC20.sol";
 // Test utilities
 import { Utilities } from "metawallet/test/utils/Utilities.sol";
 
-/// @title MockERC20 for testing
+/// @title TestMockERC20 for testing
 contract TestMockERC20 is ERC20 {
     string private _name;
     string private _symbol;
@@ -50,9 +50,19 @@ contract TestMockERC20 is ERC20 {
     }
 }
 
+/// @title WalletDeployment - Struct to hold deployed wallet contracts
+struct WalletDeployment {
+    string id;
+    TestMockERC20 asset;
+    MetaWallet proxy;
+    ERC4626ApproveAndDepositHook depositHook;
+    ERC4626RedeemHook redeemHook;
+    OneInchSwapHook oneInchSwapHook;
+}
+
 /// @title DeploymentBaseTest
-/// @notice Base test contract that deploys the full MetaWallet protocol
-/// @dev Uses the same deployment flow as production scripts for consistency
+/// @notice Base test contract that deploys the full MetaWallet protocol with multi-wallet support
+/// @dev Uses the same deployment flow as 07_DeployMultiWallet.s.sol for consistency
 contract DeploymentBaseTest is BaseTest {
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSTANTS
@@ -62,34 +72,34 @@ contract DeploymentBaseTest is BaseTest {
     uint256 constant EXECUTOR_ROLE = 2; // _ROLE_1
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // PROTOCOL CONTRACTS
+    // SHARED PROTOCOL CONTRACTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    // Core
     MetaWallet public implementation;
     VaultModule public vaultModule;
-    MetaWallet public metaWallet; // Proxy instance
+    MinimalUUPSFactory public factory;
+    MockRegistry public registry;
 
-    // Hooks
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MULTI-WALLET DEPLOYMENTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    WalletDeployment public usdcWallet;
+    WalletDeployment public wbtcWallet;
+
+    // Legacy compatibility - points to USDC wallet by default
+    MetaWallet public metaWallet;
+    TestMockERC20 public asset;
     ERC4626ApproveAndDepositHook public depositHook;
     ERC4626RedeemHook public redeemHook;
     OneInchSwapHook public oneInchSwapHook;
-
-    // External dependencies
-    MinimalSmartAccountFactory public factory;
-    MockRegistry public registry;
-
-    // Mock assets
-    TestMockERC20 public asset;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONFIGURATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    string public vaultName = "MetaVault Mock USDC";
-    string public vaultSymbol = "mvmUSDC";
-    string public accountId = "metawallet.test.v1";
-    bytes32 public salt = bytes32(uint256(1));
+    bytes32 public usdcSalt = bytes32(uint256(1));
+    bytes32 public wbtcSalt = bytes32(uint256(2));
 
     // ═══════════════════════════════════════════════════════════════════════════
     // SETUP
@@ -107,106 +117,187 @@ contract DeploymentBaseTest is BaseTest {
             charlie: utils.createUser("Charlie", new address[](0))
         });
 
-        // Deploy full protocol
-        _deployProtocol();
+        // Deploy full protocol with multiple wallets
+        _deployMultiWalletProtocol();
+
+        // Set legacy compatibility references (point to USDC wallet)
+        metaWallet = usdcWallet.proxy;
+        asset = usdcWallet.asset;
+        depositHook = usdcWallet.depositHook;
+        redeemHook = usdcWallet.redeemHook;
+        oneInchSwapHook = usdcWallet.oneInchSwapHook;
     }
 
-    /// @notice Deploys the full MetaWallet protocol
-    /// @dev Mirrors the deployment flow from Deploy.s.sol:DeployAll
-    function _deployProtocol() internal {
+    /// @notice Deploys the full MetaWallet protocol with multiple wallets
+    /// @dev Mirrors the deployment flow from 07_DeployMultiWallet.s.sol
+    function _deployMultiWalletProtocol() internal {
         vm.startPrank(users.owner);
 
-        // Step 0: Deploy mock dependencies
-        _deployMocks();
+        // Step 1: Deploy shared infrastructure
+        _deploySharedInfrastructure();
 
-        // Step 1: Deploy implementation
-        implementation = new MetaWallet();
+        // Step 2: Deploy USDC wallet
+        usdcWallet = _deployWallet("usdc", "Meta Vault USDC", "mwUSDC", 6, usdcSalt);
 
-        // Step 2: Deploy VaultModule
-        vaultModule = new VaultModule();
-
-        // Step 3: Deploy proxy via factory
-        bytes32 fullSalt =
-            bytes32(uint256(uint160(address(users.owner))) << 96) | (salt & bytes32(uint256(type(uint96).max)));
-
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
-
-        address proxy = factory.deployDeterministic(
-            address(implementation), fullSalt, users.owner, IRegistry(address(registry)), accountId
-        );
-
-        require(proxy == predictedAddress, "Address mismatch!");
-        metaWallet = MetaWallet(payable(proxy));
-
-        // Step 4: Setup VaultModule
-        metaWallet.grantRoles(users.owner, ADMIN_ROLE);
-        bytes4[] memory vaultSelectors = vaultModule.selectors();
-        metaWallet.addFunctions(vaultSelectors, address(vaultModule), false);
-        VaultModule(address(metaWallet)).initializeVault(address(asset), vaultName, vaultSymbol);
-
-        // Step 5: Deploy and install ERC4626 hooks
-        depositHook = new ERC4626ApproveAndDepositHook(address(metaWallet));
-        redeemHook = new ERC4626RedeemHook(address(metaWallet));
-
-        metaWallet.installHook(keccak256("hook.erc4626.deposit"), address(depositHook));
-        metaWallet.installHook(keccak256("hook.erc4626.redeem"), address(redeemHook));
-
-        // Step 6: Deploy 1inch swap hook
-        oneInchSwapHook = new OneInchSwapHook(address(metaWallet));
-        metaWallet.installHook(keccak256("hook.1inch.swap"), address(oneInchSwapHook));
+        // Step 3: Deploy WBTC wallet
+        wbtcWallet = _deployWallet("wbtc", "Meta Vault WBTC", "mwBTC", 8, wbtcSalt);
 
         vm.stopPrank();
     }
 
-    /// @notice Deploys mock contracts for testing
-    function _deployMocks() internal {
-        // Deploy mock asset (USDC-like)
-        asset = new TestMockERC20("Mock USDC", "mUSDC", 6);
-
-        // Mint tokens to test users
-        asset.mint(users.owner, 1_000_000 * 10 ** 6);
-        asset.mint(users.alice, 1_000_000 * 10 ** 6);
-        asset.mint(users.bob, 1_000_000 * 10 ** 6);
-        asset.mint(users.charlie, 1_000_000 * 10 ** 6);
-
+    /// @notice Deploys shared infrastructure (implementation, vaultModule, factory, registry)
+    function _deploySharedInfrastructure() internal {
         // Deploy mock registry
         registry = new MockRegistry();
 
         // Deploy factory
-        factory = new MinimalSmartAccountFactory();
+        factory = new MinimalUUPSFactory();
+
+        // Deploy implementation
+        implementation = new MetaWallet();
+
+        // Deploy VaultModule
+        vaultModule = new VaultModule();
+    }
+
+    /// @notice Deploys a single wallet with all its components
+    /// @param id Wallet identifier (e.g., "usdc", "wbtc")
+    /// @param vaultName Name for the vault token
+    /// @param vaultSymbol Symbol for the vault token
+    /// @param decimals Decimals for the mock asset
+    /// @param salt Salt for deterministic deployment
+    function _deployWallet(
+        string memory id,
+        string memory vaultName,
+        string memory vaultSymbol,
+        uint8 decimals,
+        bytes32 salt
+    )
+        internal
+        returns (WalletDeployment memory wallet)
+    {
+        wallet.id = id;
+
+        // Deploy mock asset
+        string memory assetName = string.concat("Mock ", vaultSymbol);
+        string memory assetSymbol = string.concat("m", vaultSymbol);
+        wallet.asset = new TestMockERC20(assetName, assetSymbol, decimals);
+
+        // Mint tokens to test users
+        wallet.asset.mint(users.owner, 1_000_000 * (10 ** decimals));
+        wallet.asset.mint(users.alice, 1_000_000 * (10 ** decimals));
+        wallet.asset.mint(users.bob, 1_000_000 * (10 ** decimals));
+        wallet.asset.mint(users.charlie, 1_000_000 * (10 ** decimals));
+
+        // Deploy proxy via factory
+        bytes32 fullSalt =
+            bytes32(uint256(uint160(address(users.owner))) << 96) | (salt & bytes32(uint256(type(uint96).max)));
+
+        address predictedAddress = factory.predictDeterministicAddress(address(implementation), fullSalt);
+
+        bytes memory initData = abi.encodeWithSelector(
+            MinimalSmartAccount.initialize.selector, users.owner, IRegistry(address(registry)), id
+        );
+
+        address proxy = factory.deployDeterministicAndCall(address(implementation), fullSalt, initData);
+
+        require(proxy == predictedAddress, "Address mismatch!");
+        wallet.proxy = MetaWallet(payable(proxy));
+
+        // Setup VaultModule
+        wallet.proxy.grantRoles(users.owner, ADMIN_ROLE);
+        bytes4[] memory vaultSelectors = vaultModule.selectors();
+        wallet.proxy.addFunctions(vaultSelectors, address(vaultModule), false);
+        VaultModule(address(wallet.proxy)).initializeVault(address(wallet.asset), vaultName, vaultSymbol);
+
+        // Deploy and install ERC4626 hooks
+        wallet.depositHook = new ERC4626ApproveAndDepositHook(address(wallet.proxy));
+        wallet.redeemHook = new ERC4626RedeemHook(address(wallet.proxy));
+
+        wallet.proxy.installHook(keccak256("hook.erc4626.deposit"), address(wallet.depositHook));
+        wallet.proxy.installHook(keccak256("hook.erc4626.redeem"), address(wallet.redeemHook));
+
+        // Deploy 1inch swap hook
+        wallet.oneInchSwapHook = new OneInchSwapHook(address(wallet.proxy));
+        wallet.proxy.installHook(keccak256("hook.1inch.swap"), address(wallet.oneInchSwapHook));
+
+        return wallet;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // HELPER FUNCTIONS
+    // HELPER FUNCTIONS - USDC WALLET (DEFAULT)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// @notice Helper to get the VaultModule interface on the proxy
+    /// @notice Helper to get the VaultModule interface on the default (USDC) proxy
     function vault() internal view returns (VaultModule) {
         return VaultModule(address(metaWallet));
     }
 
-    /// @notice Helper to approve and deposit assets
+    /// @notice Helper to approve and deposit assets to default wallet
     function _depositAssets(address user, uint256 amount) internal returns (uint256 shares) {
-        vm.startPrank(user);
-        asset.approve(address(metaWallet), amount);
-        shares = vault().deposit(amount, user);
-        vm.stopPrank();
+        return _depositAssetsTo(usdcWallet, user, amount);
     }
 
-    /// @notice Helper to redeem shares
+    /// @notice Helper to redeem shares from default wallet
     function _redeemShares(address user, uint256 shares) internal returns (uint256 assets) {
+        return _redeemSharesFrom(usdcWallet, user, shares);
+    }
+
+    /// @notice Helper to get user's share balance in default wallet
+    function _getShares(address user) internal view returns (uint256) {
+        return _getSharesFrom(usdcWallet, user);
+    }
+
+    /// @notice Helper to get user's asset balance for default wallet
+    function _getAssetBalance(address user) internal view returns (uint256) {
+        return _getAssetBalanceFrom(usdcWallet, user);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // HELPER FUNCTIONS - MULTI-WALLET
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// @notice Helper to get the VaultModule interface for a specific wallet
+    function vaultFor(WalletDeployment storage wallet) internal view returns (VaultModule) {
+        return VaultModule(address(wallet.proxy));
+    }
+
+    /// @notice Helper to approve and deposit assets to a specific wallet
+    function _depositAssetsTo(
+        WalletDeployment storage wallet,
+        address user,
+        uint256 amount
+    )
+        internal
+        returns (uint256 shares)
+    {
         vm.startPrank(user);
-        assets = vault().redeem(shares, user, user);
+        wallet.asset.approve(address(wallet.proxy), amount);
+        shares = VaultModule(address(wallet.proxy)).deposit(amount, user);
         vm.stopPrank();
     }
 
-    /// @notice Helper to get user's share balance
-    function _getShares(address user) internal view returns (uint256) {
-        return vault().balanceOf(user);
+    /// @notice Helper to redeem shares from a specific wallet
+    function _redeemSharesFrom(
+        WalletDeployment storage wallet,
+        address user,
+        uint256 shares
+    )
+        internal
+        returns (uint256 assets)
+    {
+        vm.startPrank(user);
+        assets = VaultModule(address(wallet.proxy)).redeem(shares, user, user);
+        vm.stopPrank();
     }
 
-    /// @notice Helper to get user's asset balance
-    function _getAssetBalance(address user) internal view returns (uint256) {
-        return asset.balanceOf(user);
+    /// @notice Helper to get user's share balance in a specific wallet
+    function _getSharesFrom(WalletDeployment storage wallet, address user) internal view returns (uint256) {
+        return VaultModule(address(wallet.proxy)).balanceOf(user);
+    }
+
+    /// @notice Helper to get user's asset balance for a specific wallet
+    function _getAssetBalanceFrom(WalletDeployment storage wallet, address user) internal view returns (uint256) {
+        return wallet.asset.balanceOf(user);
     }
 }

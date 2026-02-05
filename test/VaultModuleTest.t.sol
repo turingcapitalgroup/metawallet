@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 
-import { ERC1967Factory } from "solady/utils/ERC1967Factory.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
@@ -21,6 +21,8 @@ import { IVaultModule } from "metawallet/src/interfaces/IVaultModule.sol";
 
 import { MockRegistry } from "metawallet/test/helpers/mocks/MockRegistry.sol";
 
+import "metawallet/src/errors/Errors.sol" as Errors;
+
 import { ERC4626Events } from "metawallet/test/helpers/ERC4626Events.sol";
 import { ERC7540Events } from "metawallet/test/helpers/ERC7540Events.sol";
 
@@ -32,7 +34,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
     ///////////////////////////////////////////////////////////////*/
 
     IMetaWallet public metaWallet;
-    ERC1967Factory public proxyFactory;
+    MinimalUUPSFactory public proxyFactory;
     ERC4626ApproveAndDepositHook public depositHook;
     ERC4626RedeemHook public redeemHook;
     MockRegistry public registry;
@@ -68,14 +70,13 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
 
         registry = new MockRegistry();
 
-        proxyFactory = new ERC1967Factory();
+        proxyFactory = new MinimalUUPSFactory();
         MetaWallet _metaWalletImplementation = new MetaWallet();
 
         bytes memory _initData = abi.encodeWithSelector(
             MinimalSmartAccount.initialize.selector, users.owner, address(registry), "metawallet.vault.test.1.0"
         );
-        address _metaWalletProxy =
-            proxyFactory.deployAndCall(address(_metaWalletImplementation), users.admin, _initData);
+        address _metaWalletProxy = proxyFactory.deployAndCall(address(_metaWalletImplementation), _initData);
 
         vm.startPrank(users.owner);
         MetaWallet(payable(_metaWalletProxy)).grantRoles(users.admin, ADMIN_ROLE);
@@ -509,7 +510,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         deal(USDC_MAINNET, users.alice, DEPOSIT_AMOUNT);
 
         vm.prank(users.alice);
-        vm.expectRevert(bytes("MW1"));
+        vm.expectRevert(bytes("VM3"));
         metaWallet.requestDeposit(DEPOSIT_AMOUNT, users.alice, users.alice);
     }
 
@@ -524,7 +525,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         metaWallet.pause();
 
         vm.prank(users.alice);
-        vm.expectRevert(bytes("MW1"));
+        vm.expectRevert(bytes("VM3"));
         metaWallet.deposit(_depositAmount, users.alice);
     }
 
@@ -542,7 +543,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         metaWallet.pause();
 
         vm.prank(users.alice);
-        vm.expectRevert(bytes("MW1"));
+        vm.expectRevert(bytes("VM3"));
         metaWallet.redeem(_shares, users.alice, users.alice);
     }
 
@@ -759,7 +760,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         _strategies[1] = address(0x1234);
         _values[0] = 5000 * _1_USDC;
 
-        vm.expectRevert(bytes("MW2"));
+        vm.expectRevert(bytes("VM4"));
         metaWallet.validateTotalAssets(_strategies, _values, bytes32(0));
     }
 
@@ -913,6 +914,263 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
     }
 
     /* ///////////////////////////////////////////////////////////////
+                    SECTION 15: WITHDRAW CORRECTNESS TESTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Tests that withdraw computes correct shares when share price != 1:1
+    function test_Withdraw_CorrectSharesBurned_AfterYieldSettlement() public {
+        uint256 _depositAmount = DEPOSIT_AMOUNT;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
+        assertEq(_shares, _depositAmount, "Should get 1:1 shares at start");
+        vm.stopPrank();
+
+        uint256 _newTotalAssets = 15_000 * _1_USDC;
+        bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets - _depositAmount));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+
+        uint256 _sharePrice = metaWallet.sharePrice();
+        assertGt(_sharePrice, 1 * _1_USDC, "Share price should exceed 1 USDC after yield");
+
+        uint256 _withdrawAmount = 7500 * _1_USDC;
+        uint256 _expectedShares = metaWallet.convertToShares(_withdrawAmount);
+
+        assertEq(_expectedShares, 5000 * _1_USDC, "5000 shares for 7500 USDC at 1.5x price");
+
+        vm.startPrank(users.alice);
+        metaWallet.requestRedeem(_shares, users.alice, users.alice);
+
+        uint256 _usdcBefore = USDC_MAINNET.balanceOf(users.alice);
+        uint256 _burntShares = metaWallet.withdraw(_withdrawAmount, users.alice, users.alice);
+
+        assertEq(_burntShares, _expectedShares, "Should burn 5000 shares for 7500 USDC");
+        assertEq(USDC_MAINNET.balanceOf(users.alice), _usdcBefore + _withdrawAmount, "Should receive exactly 7500 USDC");
+        vm.stopPrank();
+    }
+
+    /// @notice Fuzz test for withdraw correctness at various share prices
+    function testFuzz_Withdraw_CorrectSharesBurned_AtVariousPrices(uint256 _yieldBps) public {
+        _yieldBps = bound(_yieldBps, 100, 5000);
+
+        uint256 _depositAmount = DEPOSIT_AMOUNT;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        uint256 _newTotalAssets = _depositAmount + (_depositAmount * _yieldBps / 10_000);
+        bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+
+        uint256 _withdrawAmount = _newTotalAssets / 2;
+        uint256 _expectedShares = metaWallet.convertToShares(_withdrawAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestRedeem(_shares, users.alice, users.alice);
+        uint256 _burntShares = metaWallet.withdraw(_withdrawAmount, users.alice, users.alice);
+        vm.stopPrank();
+
+        assertEq(_burntShares, _expectedShares, "Shares burnt should match convertToShares");
+        assertLt(_burntShares, _shares, "Should not burn all shares for half withdrawal");
+    }
+
+    /// @notice Tests withdraw with share price < 1 (loss scenario)
+    function test_Withdraw_CorrectSharesBurned_AfterLossSettlement() public {
+        uint256 _depositAmount = DEPOSIT_AMOUNT;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        uint256 _newTotalAssets = _depositAmount * 80 / 100;
+        bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
+
+        uint256 _withdrawAmount = 4000 * _1_USDC;
+        uint256 _expectedShares = metaWallet.convertToShares(_withdrawAmount);
+        assertApproxEqAbs(_expectedShares, 5000 * _1_USDC, 1, "~5000 shares for 4000 USDC at 0.8x price");
+
+        vm.startPrank(users.alice);
+        metaWallet.requestRedeem(_shares, users.alice, users.alice);
+        uint256 _burntShares = metaWallet.withdraw(_withdrawAmount, users.alice, users.alice);
+        vm.stopPrank();
+
+        assertEq(_burntShares, _expectedShares, "Correct shares burned in loss scenario");
+    }
+
+    /// @notice Tests that totalAssets() decreases by exactly the withdrawal amount
+    function test_Withdraw_TotalAssetsDecrement() public {
+        uint256 _depositAmount = DEPOSIT_AMOUNT;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        uint256 _settledTotal = 15_000 * _1_USDC;
+        bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal - _depositAmount));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
+
+        uint256 _totalAssetsBefore = metaWallet.totalAssets();
+        assertEq(_totalAssetsBefore, _settledTotal, "totalAssets should match settled value");
+
+        uint256 _withdrawAmount = 3000 * _1_USDC;
+
+        vm.startPrank(users.alice);
+        metaWallet.requestRedeem(_shares, users.alice, users.alice);
+        metaWallet.withdraw(_withdrawAmount, users.alice, users.alice);
+        vm.stopPrank();
+
+        uint256 _totalAssetsAfter = metaWallet.totalAssets();
+        assertEq(
+            _totalAssetsAfter,
+            _totalAssetsBefore - _withdrawAmount,
+            "totalAssets should decrease by exact withdrawal amount"
+        );
+    }
+
+    /// @notice Fuzz test that totalAssets = settledTotal - withdrawAmount
+    function testFuzz_Withdraw_AtVariousPrices_TotalAssetsCheck(uint256 _yieldBps, uint256 _withdrawPct) public {
+        _yieldBps = bound(_yieldBps, 100, 5000);
+        _withdrawPct = bound(_withdrawPct, 10, 90);
+
+        uint256 _depositAmount = DEPOSIT_AMOUNT;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
+        vm.stopPrank();
+
+        uint256 _settledTotal = _depositAmount + (_depositAmount * _yieldBps / 10_000);
+        bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal));
+
+        vm.prank(users.executor);
+        metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
+
+        uint256 _maxWithdrawable = metaWallet.maxWithdraw(users.alice);
+        uint256 _withdrawAmount = _maxWithdrawable * _withdrawPct / 100;
+        if (_withdrawAmount < _1_USDC) _withdrawAmount = _1_USDC;
+
+        vm.startPrank(users.alice);
+        metaWallet.requestRedeem(_shares, users.alice, users.alice);
+        metaWallet.withdraw(_withdrawAmount, users.alice, users.alice);
+        vm.stopPrank();
+
+        uint256 _totalAssetsAfter = metaWallet.totalAssets();
+        assertEq(
+            _totalAssetsAfter,
+            _settledTotal - _withdrawAmount,
+            "totalAssets should equal settledTotal minus withdrawAmount"
+        );
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                    SECTION 16: CEI PATTERN & UNDERFLOW PROTECTION TESTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Tests that redeem reverts with InvalidController BEFORE any state changes
+    ///         when called from a non-controller/non-operator address (CEI pattern fix)
+    function testRevert_Redeem_InvalidController_BeforeStateChange() public {
+        uint256 _depositAmount = DEPOSIT_AMOUNT;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        // Alice deposits and requests redeem
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
+        metaWallet.requestRedeem(_shares, users.alice, users.alice);
+        vm.stopPrank();
+
+        // Record state before the invalid call
+        uint256 _claimableBefore = metaWallet.claimableRedeemRequest(users.alice);
+        uint256 _totalSupplyBefore = metaWallet.totalSupply();
+        uint256 _totalAssetsBefore = metaWallet.totalAssets();
+
+        // Charlie (non-controller, non-operator) tries to redeem Alice's shares
+        vm.prank(users.charlie);
+        vm.expectRevert(ERC7540.InvalidController.selector);
+        metaWallet.redeem(_shares, users.charlie, users.alice);
+
+        // Verify NO state changes occurred (CEI pattern: checks before effects)
+        assertEq(metaWallet.claimableRedeemRequest(users.alice), _claimableBefore, "Claimable should be unchanged");
+        assertEq(metaWallet.totalSupply(), _totalSupplyBefore, "Total supply should be unchanged");
+        assertEq(metaWallet.totalAssets(), _totalAssetsBefore, "Total assets should be unchanged");
+    }
+
+    /// @notice Tests that withdraw reverts with InvalidController BEFORE any state changes
+    ///         when called from a non-controller/non-operator address (CEI pattern fix)
+    function testRevert_Withdraw_InvalidController_BeforeStateChange() public {
+        uint256 _depositAmount = DEPOSIT_AMOUNT;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        // Alice deposits and requests redeem
+        vm.startPrank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
+        metaWallet.requestRedeem(_shares, users.alice, users.alice);
+        vm.stopPrank();
+
+        // Record state before the invalid call
+        uint256 _claimableBefore = metaWallet.claimableRedeemRequest(users.alice);
+        uint256 _totalSupplyBefore = metaWallet.totalSupply();
+        uint256 _totalAssetsBefore = metaWallet.totalAssets();
+
+        // Charlie (non-controller, non-operator) tries to withdraw Alice's assets
+        vm.prank(users.charlie);
+        vm.expectRevert(ERC7540.InvalidController.selector);
+        metaWallet.withdraw(_depositAmount, users.charlie, users.alice);
+
+        // Verify NO state changes occurred (CEI pattern: checks before effects)
+        assertEq(metaWallet.claimableRedeemRequest(users.alice), _claimableBefore, "Claimable should be unchanged");
+        assertEq(metaWallet.totalSupply(), _totalSupplyBefore, "Total supply should be unchanged");
+        assertEq(metaWallet.totalAssets(), _totalAssetsBefore, "Total assets should be unchanged");
+    }
+
+    /// @notice Tests that totalIdle returns 0 when balance < pending (underflow protection)
+    function test_TotalIdle_ReturnsZeroWhenBalanceBelowPending() public {
+        uint256 _depositAmount = DEPOSIT_AMOUNT;
+        deal(USDC_MAINNET, users.alice, _depositAmount);
+
+        // Alice requests a deposit (this increases totalPendingDepositRequests)
+        vm.prank(users.alice);
+        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+
+        // Verify pending is now > 0
+        assertGt(metaWallet.claimableDepositRequest(users.alice), 0, "Should have pending deposit");
+
+        // Drain USDC from metaWallet to create a state where balance < pending
+        deal(USDC_MAINNET, address(metaWallet), 0);
+
+        // totalIdle should return 0 instead of reverting with underflow
+        uint256 _totalIdle = metaWallet.totalIdle();
+        assertEq(_totalIdle, 0, "totalIdle should return 0 when balance < pending");
+    }
+
+    /// @notice Tests that double initialization reverts with proper error
+    function testRevert_InitializeVault_AlreadyInitialized() public {
+        vm.prank(users.admin);
+        vm.expectRevert(abi.encodePacked(Errors.VAULTMODULE_ALREADY_INITIALIZED));
+        VaultModule(address(metaWallet)).initializeVault(address(USDC_MAINNET), "Duplicate", "DUP");
+    }
+
+    /* ///////////////////////////////////////////////////////////////
                     HELPER FUNCTIONS
     ///////////////////////////////////////////////////////////////*/
 
@@ -1000,7 +1258,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
 
     function testRevert_SetMaxAllowedDelta_ExceedsBPS() public {
         vm.prank(users.admin);
-        vm.expectRevert(bytes("MW4"));
+        vm.expectRevert(bytes("VM6"));
         metaWallet.setMaxAllowedDelta(10_001); // > 100%
     }
 
@@ -1068,7 +1326,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         bytes32 _merkleRoot = keccak256(abi.encodePacked("big_yield"));
 
         vm.prank(users.executor);
-        vm.expectRevert(bytes("MW3"));
+        vm.expectRevert(bytes("VM5"));
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
     }
 
@@ -1090,7 +1348,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         bytes32 _merkleRoot = keccak256(abi.encodePacked("big_loss"));
 
         vm.prank(users.executor);
-        vm.expectRevert(bytes("MW3"));
+        vm.expectRevert(bytes("VM5"));
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
     }
 

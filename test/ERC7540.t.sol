@@ -9,26 +9,26 @@ import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 import { ERC4626Events } from "metawallet/test/helpers/ERC4626Events.sol";
 import { ERC7540Events } from "metawallet/test/helpers/ERC7540Events.sol";
-import { ERC1967Factory } from "solady/utils/ERC1967Factory.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 contract ERC7540Test is BaseTest, ERC7540Events, ERC4626Events {
     using SafeTransferLib for address;
 
     IMetaWallet public metaWallet;
-    ERC1967Factory public proxyFactory;
+    MinimalUUPSFactory public proxyFactory;
 
     uint256 public constant ADMIN_ROLE = 1;
     uint256 public constant WHITELISTED_ROLE = 2;
 
     function setUp() public {
         _setUp("MAINNET", 23_783_139);
-        proxyFactory = new ERC1967Factory();
+        proxyFactory = new MinimalUUPSFactory();
         MetaWallet metaWalletImplementation = new MetaWallet();
         bytes memory initData = abi.encodeWithSelector(
             MinimalSmartAccount.initialize.selector, users.owner, makeAddr("registry"), "kam.metawallet.1.0"
         );
-        address metaWalletProxy = proxyFactory.deployAndCall(address(metaWalletImplementation), users.admin, initData);
+        address metaWalletProxy = proxyFactory.deployAndCall(address(metaWalletImplementation), initData);
         MetaWallet(payable(metaWalletProxy)).grantRoles(users.admin, ADMIN_ROLE);
         MetaWallet(payable(metaWalletProxy)).grantRoles(users.alice, WHITELISTED_ROLE);
         VaultModule vault = new VaultModule();
