@@ -259,20 +259,26 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     }
 
     /// @notice Execute the deposit (for dynamic amount flow)
+    /// @dev Uses balance delta to measure shares received instead of trusting return value
     /// @param _receiver The address to receive the shares
     function executeDeposit(address _receiver) external onlyOwner {
         DepositContext storage _ctx = _depositContext;
-        uint256 _shares = IERC4626(_ctx.vault).deposit(_ctx.assetsDeposited, _receiver);
+        uint256 _sharesBefore = IERC20(_ctx.vault).balanceOf(_receiver);
+        IERC4626(_ctx.vault).deposit(_ctx.assetsDeposited, _receiver);
+        uint256 _shares = IERC20(_ctx.vault).balanceOf(_receiver) - _sharesBefore;
         _ctx.receiver = _receiver;
         _ctx.sharesReceived = _shares;
     }
 
     /// @notice Execute the deposit (for static amount flow)
+    /// @dev Uses balance delta to measure shares received instead of trusting return value
     /// @param _vault The vault address
     /// @param _assets The amount of assets to deposit
     /// @param _receiver The address to receive the shares
     function executeDepositStatic(address _vault, uint256 _assets, address _receiver) external onlyOwner {
-        uint256 _shares = IERC4626(_vault).deposit(_assets, _receiver);
+        uint256 _sharesBefore = IERC20(_vault).balanceOf(_receiver);
+        IERC4626(_vault).deposit(_assets, _receiver);
+        uint256 _shares = IERC20(_vault).balanceOf(_receiver) - _sharesBefore;
         _depositContext.sharesReceived = _shares;
     }
 

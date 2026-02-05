@@ -267,10 +267,13 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     }
 
     /// @notice Execute the redemption (for dynamic amount flow)
+    /// @dev Uses balance delta to measure assets received instead of trusting return value
     /// @param _receiver The address to receive the assets
     function executeRedeem(address _receiver) external onlyOwner {
         RedeemContext storage _ctx = _redeemContext;
-        uint256 _assets = IERC4626(_ctx.vault).redeem(_ctx.sharesRedeemed, _receiver, _ctx.owner);
+        uint256 _assetsBefore = IERC20(_ctx.asset).balanceOf(_receiver);
+        IERC4626(_ctx.vault).redeem(_ctx.sharesRedeemed, _receiver, _ctx.owner);
+        uint256 _assets = IERC20(_ctx.asset).balanceOf(_receiver) - _assetsBefore;
         _ctx.receiver = _receiver;
         _ctx.assetsReceived = _assets;
     }
