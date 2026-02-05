@@ -76,23 +76,28 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
 
             // solhint-disable-next-line no-inline-assembly
             assembly ("memory-safe") {
+                // Load function selector (first 4 bytes)
                 _functionSig := mload(add(_callData, 32))
             }
 
+            // Extract parameters if callData has more than selector
             if (_callData.length > 4) {
                 uint256 _paramsLength = _callData.length - 4;
                 _params = new bytes(_paramsLength);
 
                 // solhint-disable-next-line no-inline-assembly
                 assembly ("memory-safe") {
-                    let _src := add(add(_callData, 32), 4)
-                    let _dst := add(_params, 32)
+                    // Copy from _callData[4:] to _params
+                    let _src := add(add(_callData, 32), 4) // _callData start + length slot + 4 bytes
+                    let _dst := add(_params, 32) // _params start + length slot
 
+                    // Copy in 32-byte chunks
                     let _fullWords := div(_paramsLength, 32)
                     for { let _j := 0 } lt(_j, _fullWords) { _j := add(_j, 1) } {
                         mstore(add(_dst, mul(_j, 32)), mload(add(_src, mul(_j, 32))))
                     }
 
+                    // Copy remaining bytes
                     let _remaining := mod(_paramsLength, 32)
                     if _remaining {
                         let _mask := not(sub(shl(mul(sub(32, _remaining), 8), 1), 1))

@@ -237,8 +237,8 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
             vault: _vault,
             asset: _asset,
             assetsDeposited: _amount,
-            sharesReceived: 0,
-            receiver: address(0),
+            sharesReceived: 0, // Will be updated after deposit
+            receiver: address(0), // Will be updated after deposit
             timestamp: block.timestamp
         });
     }
