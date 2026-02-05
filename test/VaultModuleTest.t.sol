@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 
-import { ERC1967Factory } from "solady/utils/ERC1967Factory.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
@@ -34,7 +34,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
     ///////////////////////////////////////////////////////////////*/
 
     IMetaWallet public metaWallet;
-    ERC1967Factory public proxyFactory;
+    MinimalUUPSFactory public proxyFactory;
     ERC4626ApproveAndDepositHook public depositHook;
     ERC4626RedeemHook public redeemHook;
     MockRegistry public registry;
@@ -70,14 +70,13 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
 
         registry = new MockRegistry();
 
-        proxyFactory = new ERC1967Factory();
+        proxyFactory = new MinimalUUPSFactory();
         MetaWallet _metaWalletImplementation = new MetaWallet();
 
         bytes memory _initData = abi.encodeWithSelector(
             MinimalSmartAccount.initialize.selector, users.owner, address(registry), "metawallet.vault.test.1.0"
         );
-        address _metaWalletProxy =
-            proxyFactory.deployAndCall(address(_metaWalletImplementation), users.admin, _initData);
+        address _metaWalletProxy = proxyFactory.deployAndCall(address(_metaWalletImplementation), _initData);
 
         vm.startPrank(users.owner);
         MetaWallet(payable(_metaWalletProxy)).grantRoles(users.admin, ADMIN_ROLE);

@@ -3,13 +3,13 @@ pragma solidity ^0.8.20;
 
 import { Script, console } from "forge-std/Script.sol";
 
-import { MetaWallet } from "metawallet/src/MetaWallet.sol";
+import { MetaWallet, MinimalSmartAccount } from "metawallet/src/MetaWallet.sol";
 import { ERC4626ApproveAndDepositHook } from "metawallet/src/hooks/ERC4626ApproveAndDepositHook.sol";
 import { ERC4626RedeemHook } from "metawallet/src/hooks/ERC4626RedeemHook.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
-import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
 import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 
 /// @title Deploy
 /// @notice Deployment script for MetaWallet implementation and VaultModule
@@ -72,16 +72,18 @@ contract DeployProxy is Script {
         console.log("Owner:", cfg.owner);
         console.log("Asset:", cfg.asset);
 
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(cfg.factory);
+        MinimalUUPSFactory factory = MinimalUUPSFactory(cfg.factory);
 
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+        address predictedAddress = factory.predictDeterministicAddress(cfg.implementation, fullSalt);
         console.log("Predicted proxy address:", predictedAddress);
+
+        bytes memory initData = abi.encodeWithSelector(
+            MinimalSmartAccount.initialize.selector, cfg.owner, IRegistry(cfg.registry), cfg.accountId
+        );
 
         vm.startBroadcast(deployerPrivateKey);
 
-        proxy = factory.deployDeterministic(
-            cfg.implementation, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
-        );
+        proxy = factory.deployDeterministicAndCall(cfg.implementation, fullSalt, initData);
         console.log("Proxy deployed at:", proxy);
 
         _setupVaultModule(proxy, cfg);
@@ -149,16 +151,18 @@ contract DeployProxyWithHooks is Script {
         console.log("Factory:", cfg.factory);
         console.log("Implementation:", cfg.implementation);
 
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(cfg.factory);
+        MinimalUUPSFactory factory = MinimalUUPSFactory(cfg.factory);
 
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+        address predictedAddress = factory.predictDeterministicAddress(cfg.implementation, fullSalt);
         console.log("Predicted proxy address:", predictedAddress);
+
+        bytes memory initData = abi.encodeWithSelector(
+            MinimalSmartAccount.initialize.selector, cfg.owner, IRegistry(cfg.registry), cfg.accountId
+        );
 
         vm.startBroadcast(deployerPrivateKey);
 
-        proxy = factory.deployDeterministic(
-            cfg.implementation, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
-        );
+        proxy = factory.deployDeterministicAndCall(cfg.implementation, fullSalt, initData);
 
         _setupVaultModule(proxy, cfg);
 
@@ -215,15 +219,17 @@ contract DeployProxyWithHooks is Script {
 contract PredictProxyAddress is Script {
     function run() external view {
         address factoryAddress = vm.envAddress("FACTORY_ADDRESS");
+        address implementationAddress = vm.envAddress("IMPLEMENTATION_ADDRESS");
         address deployer = vm.envAddress("DEPLOYER_ADDRESS");
         bytes32 salt = bytes32(vm.envOr("DEPLOY_SALT", uint256(0)));
 
         bytes32 fullSalt = bytes32(uint256(uint160(deployer))) | (salt >> 160);
 
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(factoryAddress);
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+        MinimalUUPSFactory factory = MinimalUUPSFactory(factoryAddress);
+        address predictedAddress = factory.predictDeterministicAddress(implementationAddress, fullSalt);
 
         console.log("Factory:", factoryAddress);
+        console.log("Implementation:", implementationAddress);
         console.log("Deployer:", deployer);
         console.log("Salt:", vm.toString(salt));
         console.log("Predicted proxy address:", predictedAddress);
@@ -318,10 +324,6 @@ contract DeployAll is Script {
         console.log("Deployer:", deployer);
         console.log("Factory:", cfg.factory);
 
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(cfg.factory);
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
-        console.log("Predicted proxy address:", predictedAddress);
-
         vm.startBroadcast(deployerPrivateKey);
 
         // Step 1: Deploy implementation contracts
@@ -331,10 +333,16 @@ contract DeployAll is Script {
         deployed.vaultModule = address(new VaultModule());
         console.log("[2/5] VaultModule:", deployed.vaultModule);
 
-        // Step 2: Deploy proxy via factory
-        deployed.proxy = factory.deployDeterministic(
-            deployed.implementation, fullSalt, cfg.owner, IRegistry(cfg.registry), cfg.accountId
+        MinimalUUPSFactory factory = MinimalUUPSFactory(cfg.factory);
+        address predictedAddress = factory.predictDeterministicAddress(deployed.implementation, fullSalt);
+        console.log("Predicted proxy address:", predictedAddress);
+
+        bytes memory initData = abi.encodeWithSelector(
+            MinimalSmartAccount.initialize.selector, cfg.owner, IRegistry(cfg.registry), cfg.accountId
         );
+
+        // Step 2: Deploy proxy via factory
+        deployed.proxy = factory.deployDeterministicAndCall(deployed.implementation, fullSalt, initData);
         console.log("[3/5] Proxy deployed:", deployed.proxy);
 
         // Step 3: Setup VaultModule

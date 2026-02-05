@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import { Script, console } from "forge-std/Script.sol";
 
-import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 
 import { DeploymentManager } from "../utils/DeploymentManager.sol";
 
@@ -12,18 +12,20 @@ import { DeploymentManager } from "../utils/DeploymentManager.sol";
 contract PredictProxyAddressScript is Script, DeploymentManager {
     function run() external view {
         NetworkConfig memory config = readNetworkConfig();
+        address implementation = vm.envAddress("IMPLEMENTATION_ADDRESS");
 
         // Salt format: [20 bytes caller address][12 bytes custom salt]
         bytes32 fullSalt = bytes32(uint256(uint160(config.roles.deployer)) << 96)
             | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
 
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(config.external_.factory);
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+        MinimalUUPSFactory factory = MinimalUUPSFactory(config.external_.factory);
+        address predictedAddress = factory.predictDeterministicAddress(implementation, fullSalt);
 
         console.log("=== PROXY ADDRESS PREDICTION ===");
-        console.log("Factory:   ", config.external_.factory);
-        console.log("Deployer:  ", config.roles.deployer);
-        console.log("Salt:      ", vm.toString(config.deployment.salt));
+        console.log("Factory:       ", config.external_.factory);
+        console.log("Implementation:", implementation);
+        console.log("Deployer:      ", config.roles.deployer);
+        console.log("Salt:          ", vm.toString(config.deployment.salt));
         console.log("");
         console.log("PREDICTED ADDRESS:", predictedAddress);
         console.log("================================");
@@ -38,6 +40,7 @@ contract PredictMainnetAddressScript is Script, DeploymentManager {
     function run() external view {
         MultiChainConfig memory config = readMainnetConfig();
         uint256 chainCount = getChainCount();
+        address implementation = vm.envAddress("IMPLEMENTATION_ADDRESS");
 
         require(chainCount > 0, "No chains configured");
 
@@ -48,13 +51,14 @@ contract PredictMainnetAddressScript is Script, DeploymentManager {
         bytes32 fullSalt = bytes32(uint256(uint160(config.roles.deployer)) << 96)
             | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
 
-        MinimalSmartAccountFactory factory = MinimalSmartAccountFactory(firstChain.external_.factory);
-        address predictedAddress = factory.predictDeterministicAddress(fullSalt);
+        MinimalUUPSFactory factory = MinimalUUPSFactory(firstChain.external_.factory);
+        address predictedAddress = factory.predictDeterministicAddress(implementation, fullSalt);
 
         console.log("=== MAINNET ADDRESS PREDICTION ===");
-        console.log("Deployer:  ", config.roles.deployer);
-        console.log("Salt:      ", vm.toString(config.deployment.salt));
-        console.log("Full Salt: ", vm.toString(fullSalt));
+        console.log("Implementation:", implementation);
+        console.log("Deployer:      ", config.roles.deployer);
+        console.log("Salt:          ", vm.toString(config.deployment.salt));
+        console.log("Full Salt:     ", vm.toString(fullSalt));
         console.log("");
         console.log("PREDICTED PROXY ADDRESS:", predictedAddress);
         console.log("");

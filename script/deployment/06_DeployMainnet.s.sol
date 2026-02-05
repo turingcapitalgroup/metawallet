@@ -3,14 +3,14 @@ pragma solidity ^0.8.20;
 
 import { Script } from "forge-std/Script.sol";
 
-import { MetaWallet } from "metawallet/src/MetaWallet.sol";
+import { MetaWallet, MinimalSmartAccount } from "metawallet/src/MetaWallet.sol";
 import { ERC4626ApproveAndDepositHook } from "metawallet/src/hooks/ERC4626ApproveAndDepositHook.sol";
 import { ERC4626RedeemHook } from "metawallet/src/hooks/ERC4626RedeemHook.sol";
 import { OneInchSwapHook } from "metawallet/src/hooks/OneInchSwapHook.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
-import { MinimalSmartAccountFactory } from "minimal-smart-account/MinimalSmartAccountFactory.sol";
 import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 
 import { ERC20 } from "solady/tokens/ERC20.sol";
 
@@ -143,14 +143,15 @@ contract DeployMainnetScript is Script, DeploymentManager {
         bytes32 fullSalt =
             bytes32(uint256(uint160(msg.sender)) << 96) | (config.deployment.salt & bytes32(uint256(type(uint96).max)));
 
-        MinimalSmartAccountFactory factoryContract = MinimalSmartAccountFactory(deployed.factory);
-        address predictedAddress = factoryContract.predictDeterministicAddress(fullSalt);
+        MinimalUUPSFactory factoryContract = MinimalUUPSFactory(deployed.factory);
+        address predictedAddress = factoryContract.predictDeterministicAddress(deployed.implementation, fullSalt);
         _log("Predicted proxy address:", predictedAddress);
 
         string memory accountId = config.vault.accountId;
-        deployed.proxy = factoryContract.deployDeterministic(
-            deployed.implementation, fullSalt, config.roles.owner, IRegistry(deployed.registry), accountId
+        bytes memory initData = abi.encodeWithSelector(
+            MinimalSmartAccount.initialize.selector, config.roles.owner, IRegistry(deployed.registry), accountId
         );
+        deployed.proxy = factoryContract.deployDeterministicAndCall(deployed.implementation, fullSalt, initData);
         if (writeToJson) {
             writeContractAddress("proxy", deployed.proxy);
         }

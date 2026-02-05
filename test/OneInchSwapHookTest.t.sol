@@ -6,7 +6,7 @@ import { console } from "forge-std/console.sol";
 import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 
 // External Libraries
-import { ERC1967Factory } from "solady/utils/ERC1967Factory.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 // Local Contracts
@@ -66,7 +66,7 @@ contract OneInchSwapHookTest is BaseTest {
     ///////////////////////////////////////////////////////////////*/
 
     IMetaWallet public metaWallet;
-    ERC1967Factory public proxyFactory;
+    MinimalUUPSFactory public proxyFactory;
     OneInchSwapHook public swapHook;
     ERC4626ApproveAndDepositHook public depositHook;
     ERC4626RedeemHook public redeemHook;
@@ -109,15 +109,14 @@ contract OneInchSwapHookTest is BaseTest {
         oneInchRouter = new MockOneInchRouter();
 
         // Deploy proxy factory and MetaWallet implementation
-        proxyFactory = new ERC1967Factory();
+        proxyFactory = new MinimalUUPSFactory();
         MetaWallet _metaWalletImplementation = new MetaWallet();
 
         // Initialize MetaWallet proxy
         bytes memory _initData = abi.encodeWithSelector(
             MinimalSmartAccount.initialize.selector, users.owner, address(registry), "metawallet.hooks.1.0"
         );
-        address _metaWalletProxy =
-            proxyFactory.deployAndCall(address(_metaWalletImplementation), users.admin, _initData);
+        address _metaWalletProxy = proxyFactory.deployAndCall(address(_metaWalletImplementation), _initData);
 
         // Grant admin and executor roles
         vm.prank(users.owner);
