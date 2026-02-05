@@ -30,19 +30,19 @@ library ERC7540Lib {
     }
 
     /// @notice Converts a given amount of assets to shares
-    /// @dev Uses full multiplication and division without rounding
+    /// @dev Uses full multiplication and division rounding down
     /// @param self The filled request (ERC7540_FilledRequest) to operate on
     /// @param assets The amount of assets to convert to shares
-    /// @return The equivalent amount of shares
+    /// @return The equivalent amount of shares, rounded down
     function convertToShares(ERC7540_FilledRequest memory self, uint256 assets) internal pure returns (uint256) {
         return FixedPointMathLib.fullMulDiv(self.shares, assets, self.assets);
     }
 
     /// @notice Converts a given amount of shares to assets
-    /// @dev Uses full multiplication and division with rounding up
+    /// @dev Uses full multiplication and division rounding down
     /// @param self The filled request (ERC7540_FilledRequest) to operate on
     /// @param shares The amount of shares to convert to assets
-    /// @return The equivalent amount of assets, rounded up
+    /// @return The equivalent amount of assets, rounded down
     function convertToAssets(ERC7540_FilledRequest memory self, uint256 shares) internal pure returns (uint256) {
         return FixedPointMathLib.fullMulDiv(self.assets, shares, self.shares);
     }
@@ -74,6 +74,11 @@ library ERC7540Lib {
         return ERC7540_Request.wrap(ERC7540_Request.unwrap(self) - x);
     }
 
+    /// @notice Subtracts a value from an ERC7540_Request, clamping to zero instead of reverting on underflow
+    /// @dev Returns zero if `x` exceeds the underlying value of `self`, otherwise returns `self - x`
+    /// @param self The ERC7540_Request to operate on
+    /// @param x The value to subtract
+    /// @return A new ERC7540_Request with the result clamped to zero
     function sub0(ERC7540_Request self, uint256 x) internal pure returns (ERC7540_Request) {
         return ERC7540_Request.wrap(x > ERC7540_Request.unwrap(self) ? 0 : ERC7540_Request.unwrap(self) - x);
     }

@@ -83,8 +83,6 @@ abstract contract HookExecution is IHookExecution {
         require(_hookAddress != address(0), HOOKEXECUTION_HOOK_NOT_INSTALLED);
 
         delete $.hooks[_hookId];
-
-        // Remove from array
         $.hookIds.remove(_hookId);
 
         emit HookUninstalled(_hookId, _hookAddress);
@@ -119,15 +117,12 @@ abstract contract HookExecution is IHookExecution {
     {
         require(_hookExecutions.length > 0, HOOKEXECUTION_EMPTY_HOOK_CHAIN);
 
-        // Build the complete execution sequence by chaining all hooks
         Execution[] memory _allExecutions = _buildExecutionChain(_hookExecutions);
-
-        // Execute all operations in sequence
         return _processHookChain(_allExecutions, _hookExecutions);
     }
 
     /// @notice Build the complete execution chain from all hooks
-    /// @dev Each hook's buildExecutions() returns [preHook, ...operations, postHook]
+    /// @dev Single-pass: calls buildExecutions() once per hook, caches results, then flattens
     /// @param _hookExecutions Array of hook executions to build chain from
     /// @return _allExecutions Complete array of executions to perform
     function _buildExecutionChain(HookExecution[] calldata _hookExecutions)
@@ -137,30 +132,26 @@ abstract contract HookExecution is IHookExecution {
     {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
 
-        // First pass: count total executions needed
+        uint256 _hookCount = _hookExecutions.length;
+        Execution[][] memory _hookExecArrays = new Execution[][](_hookCount);
         uint256 _totalExecutions = 0;
-        for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
+
+        for (uint256 _i = 0; _i < _hookCount; _i++) {
             address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
             require(_hookAddress != address(0), HOOKEXECUTION_HOOK_NOT_INSTALLED);
 
             address _previousHook = _i > 0 ? $.hooks[_hookExecutions[_i - 1].hookId] : address(0);
-            Execution[] memory _hookExecs = IHook(_hookAddress).buildExecutions(_previousHook, _hookExecutions[_i].data);
-            _totalExecutions += _hookExecs.length;
+            _hookExecArrays[_i] = IHook(_hookAddress).buildExecutions(_previousHook, _hookExecutions[_i].data);
+            _totalExecutions += _hookExecArrays[_i].length;
         }
 
-        // Second pass: build the complete execution array
         _allExecutions = new Execution[](_totalExecutions);
         uint256 _execIndex = 0;
 
-        for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
-            address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
-            address _previousHook = _i > 0 ? $.hooks[_hookExecutions[_i - 1].hookId] : address(0);
-
-            Execution[] memory _hookExecs = IHook(_hookAddress).buildExecutions(_previousHook, _hookExecutions[_i].data);
-
-            // Copy hook executions into the main array
-            for (uint256 _j = 0; _j < _hookExecs.length; _j++) {
-                _allExecutions[_execIndex++] = _hookExecs[_j];
+        for (uint256 _i = 0; _i < _hookCount; _i++) {
+            uint256 _len = _hookExecArrays[_i].length;
+            for (uint256 _j = 0; _j < _len; _j++) {
+                _allExecutions[_execIndex++] = _hookExecArrays[_i][_j];
             }
         }
     }
@@ -179,17 +170,14 @@ abstract contract HookExecution is IHookExecution {
     {
         HookExecutionStorage storage $ = _getHookExecutionStorage();
 
-        // Set execution context for all hooks
         for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
             address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
             IHook(_hookAddress).initializeHookContext();
             emit HookExecutionStarted(_hookExecutions[_i].hookId, _hookAddress);
         }
 
-        // Execute all operations using the implementation's _exec function
         _results = _executeOperations(_executions);
 
-        // Reset execution state for all hooks
         for (uint256 _i = 0; _i < _hookExecutions.length; _i++) {
             address _hookAddress = $.hooks[_hookExecutions[_i].hookId];
             IHook(_hookAddress).finalizeHookContext();
@@ -208,14 +196,11 @@ abstract contract HookExecution is IHookExecution {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookExecution
-    /// @param _hookId The hook identifier to query
-    /// @return _hookAddress The address of the hook
     function getHook(bytes32 _hookId) external view returns (address _hookAddress) {
         return _getHook(_hookId);
     }
 
     /// @inheritdoc IHookExecution
-    /// @return _hookIds Array of all installed hook identifiers
     function getInstalledHooks() external view returns (bytes32[] memory _hookIds) {
         return _getInstalledHooks();
     }

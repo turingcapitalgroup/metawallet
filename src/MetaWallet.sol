@@ -27,15 +27,12 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookExecution
-    /// @param _hookId The unique identifier for the hook
-    /// @param _hookAddress The address of the hook implementation
     function installHook(bytes32 _hookId, address _hookAddress) external {
         _checkAdminRole();
         _installHook(_hookId, _hookAddress);
     }
 
     /// @inheritdoc IHookExecution
-    /// @param _hookId The unique identifier for the hook to uninstall
     function uninstallHook(bytes32 _hookId) external {
         _checkAdminRole();
         _uninstallHook(_hookId);
@@ -46,8 +43,6 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookExecution
-    /// @param _hookExecutions Array of hook executions to perform
-    /// @return _results Results from each hook execution
     function executeWithHookExecution(HookExecution[] calldata _hookExecutions)
         external
         returns (bytes[] memory _results)
@@ -76,7 +71,6 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
 
             bytes memory _callData = _executions[_i].callData;
 
-            // Extract selector and parameters
             bytes4 _functionSig;
             bytes memory _params;
 
@@ -106,20 +100,16 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
                     // Copy remaining bytes
                     let _remaining := mod(_paramsLength, 32)
                     if _remaining {
-                        let _mask := sub(shl(mul(_remaining, 8), 1), 1)
-                        let _srcWord := and(mload(add(_src, mul(_fullWords, 32))), _mask)
-                        let _dstWord := and(mload(add(_dst, mul(_fullWords, 32))), not(_mask))
-                        mstore(add(_dst, mul(_fullWords, 32)), or(_srcWord, _dstWord))
+                        let _mask := not(sub(shl(mul(sub(32, _remaining), 8), 1), 1))
+                        let _off := mul(_fullWords, 32)
+                        mstore(add(_dst, _off), and(mload(add(_src, _off)), _mask))
                     }
                 }
             } else {
                 _params = new bytes(0);
             }
 
-            // Validate through registry
             _registry.authorizeCall(_executions[_i].target, _functionSig, _params);
-
-            // Execute call
             _results[_i] = _executions[_i].target.callContract(_executions[_i].value, _callData);
 
             emit Executed($.nonce, msg.sender, _executions[_i].target, _callData, _executions[_i].value, _results[_i]);

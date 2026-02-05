@@ -12,6 +12,17 @@ MetaWallet enables institutional fund managers to operate a vault that accepts u
 - **Hook System**: Modular, chainable hooks for strategy interactions
 - **Merkle Proof Settlements**: Off-chain attestation of external holdings
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | System design, inheritance, storage patterns |
+| [Hooks](docs/hooks.md) | Hook system, execution flows, chaining |
+| [Interfaces](docs/interfaces.md) | Complete interface reference |
+| [Security](docs/security.md) | Access control, trust model, error codes |
+| [Coding Standards](docs/coding-standards.md) | Development conventions |
+| [Diagram](docs/diagram.md) | System architecture (Mermaid) |
+
 ## Architecture
 
 ```
@@ -204,6 +215,12 @@ forge test
 
 ```shell
 forge fmt
+```
+
+### Generate Docs
+
+```shell
+forge doc --serve
 ```
 
 ## Deployment

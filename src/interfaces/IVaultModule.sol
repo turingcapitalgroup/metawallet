@@ -6,12 +6,16 @@ interface IVaultModule {
                             EVENTS
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Emitted when a settlement is executed
     event SettlementExecuted(uint256 indexed totalAssets, bytes32 indexed merkleRoot);
 
+    /// @notice Emitted when the vault is paused
     event Paused(address indexed account);
 
+    /// @notice Emitted when the vault is unpaused
     event Unpaused(address indexed account);
 
+    /// @notice Emitted when the max allowed delta is updated
     event MaxAllowedDeltaUpdated(uint256 indexed maxAllowedDelta);
 
     /// @notice Initializes the vault logic with asset and token metadata
@@ -25,6 +29,7 @@ interface IVaultModule {
     function sharePrice() external view returns (uint256);
 
     /// @notice Returns the current total idle assets (actual balance in vault)
+    /// @return The idle asset balance available for withdrawals
     function totalIdle() external view returns (uint256);
 
     /// @notice Returns the current Merkle Root of strategy assets
