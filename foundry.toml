@@ -23,7 +23,7 @@ gas_limit = 100_000_000
 
 [lint]
 exclude_lints = ["mixed-case-function","screaming-snake-case-immutable","pascal-case-struct", "mixed-case-variable", "unsafe-cheatcode"]
-exclude_paths = ["src/vendor"]
+ignore = ["src/vendor/**/*"]
 
 [fmt]
 bracket_spacing = true
