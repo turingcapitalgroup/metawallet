@@ -23,6 +23,7 @@ gas_limit = 100_000_000
 
 [lint]
 exclude_lints = ["mixed-case-function","screaming-snake-case-immutable","pascal-case-struct", "mixed-case-variable", "unsafe-cheatcode"]
+exclude_paths = ["src/vendor"]
 
 [fmt]
 bracket_spacing = true
@@ -39,7 +40,6 @@ out = "foundry-docs/"
 title = "MetaWallet Contracts Documentation"
 
 [dependencies]
-solady = "0.1.26"
 minimal-smart-account = { version = "1.0", git = "https://github.com/turingcapitalgroup/minimal-smart-account.git"}
 forge-std = "1.11.0"
 kam = { version = "1.0", git = "https://github.com/turingcapitalgroup/kam.git" }
