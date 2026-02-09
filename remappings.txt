@@ -4,4 +4,5 @@ metawallet/src/=src/
 metawallet/test/=test/
 minimal-smart-account/=dependencies/minimal-smart-account-1.0/src/
 minimal-uups-factory/=dependencies/minimal-uups-factory-1.0.0/src/
+morpho-blue/=src/vendor/morpho-blue/
 solady/=src/vendor/solady/

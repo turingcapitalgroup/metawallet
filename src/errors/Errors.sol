@@ -7,6 +7,8 @@ pragma solidity ^0.8.20;
 ///      - H4D*: ERC4626ApproveAndDepositHook errors
 ///      - H4R*: ERC4626RedeemHook errors
 ///      - H1I*: OneInchSwapHook errors
+///      - HMS*: MorphoSupplyHook errors
+///      - HMW*: MorphoWithdrawHook errors
 
 // HookExecution Errors
 string constant HOOKEXECUTION_INVALID_HOOK_ADDRESS = "HE1";
@@ -38,4 +40,14 @@ string constant HOOKONEINCH_PREVIOUS_HOOK_NOT_FOUND = "H1I2";
 string constant HOOKONEINCH_INSUFFICIENT_OUTPUT = "H1I3";
 string constant HOOKONEINCH_INVALID_ROUTER = "H1I4";
 string constant HOOKONEINCH_ROUTER_NOT_ALLOWED = "H1I5";
+
+// MorphoSupplyHook Errors
+string constant HOOKMORPHOSUPPLY_INVALID_HOOK_DATA = "HMS1";
+string constant HOOKMORPHOSUPPLY_INSUFFICIENT_SHARES = "HMS4";
+string constant HOOKMORPHOSUPPLY_PREVIOUS_HOOK_NOT_FOUND = "HMS6";
+
+// MorphoWithdrawHook Errors
+string constant HOOKMORPHOWITHDRAW_INVALID_HOOK_DATA = "HMW1";
+string constant HOOKMORPHOWITHDRAW_INSUFFICIENT_ASSETS = "HMW4";
+string constant HOOKMORPHOWITHDRAW_PREVIOUS_HOOK_NOT_FOUND = "HMW6";
 
