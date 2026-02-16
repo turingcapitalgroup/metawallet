@@ -118,8 +118,8 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
         if (_useDynamicAmount) {
             require(_previousHook != address(0), HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND);
 
-            // [getDynamicAmount, approveVault, deposit, (optional) validate]
-            uint256 _execCount = _depositData.minShares > 0 ? 4 : 3;
+            // [getDynamicAmount, approveVault, deposit, resetApproval, (optional) validate]
+            uint256 _execCount = _depositData.minShares > 0 ? 5 : 4;
             _executions = new Execution[](_execCount);
 
             _executions[0] = Execution({
@@ -141,8 +141,16 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
                 value: 0,
                 callData: abi.encodeWithSelector(this.executeDeposit.selector, _depositData.receiver)
             });
+
+            // Clear residual approval after deposit
+            _executions[3] = Execution({
+                target: address(this),
+                value: 0,
+                callData: abi.encodeWithSelector(this.resetDepositApproval.selector, _asset, _depositData.vault)
+            });
+
             if (_depositData.minShares > 0) {
-                _executions[3] = Execution({
+                _executions[4] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(this.validateMinShares.selector, _depositData.minShares)
@@ -151,8 +159,8 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
         } else {
             require(_depositData.assets > 0, HOOK4626DEPOSIT_INVALID_HOOK_DATA);
 
-            // [transfer, approve, deposit, storeContext, (optional) validate]
-            uint256 _execCount = _depositData.minShares > 0 ? 5 : 4;
+            // [transfer, approve, deposit, resetApproval, storeContext, (optional) validate]
+            uint256 _execCount = _depositData.minShares > 0 ? 6 : 5;
             _executions = new Execution[](_execCount);
 
             _executions[0] = Execution({
@@ -177,7 +185,14 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
                 )
             });
 
+            // Clear residual approval after deposit
             _executions[3] = Execution({
+                target: address(this),
+                value: 0,
+                callData: abi.encodeWithSelector(this.resetDepositApproval.selector, _asset, _depositData.vault)
+            });
+
+            _executions[4] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
@@ -190,7 +205,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
             });
 
             if (_depositData.minShares > 0) {
-                _executions[4] = Execution({
+                _executions[5] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(this.validateMinShares.selector, _depositData.minShares)
@@ -256,6 +271,14 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _amount The amount to approve
     function approveForDepositStatic(address _asset, address _vault, uint256 _amount) external onlyOwner {
         _asset.safeApproveWithRetry(_vault, _amount);
+    }
+
+    /// @notice Reset the vault approval to 0 after a deposit
+    /// @dev Clears any residual approval from the hook to the vault
+    /// @param _asset The asset address
+    /// @param _vault The vault address (spender)
+    function resetDepositApproval(address _asset, address _vault) external onlyOwner {
+        _asset.safeApprove(_vault, 0);
     }
 
     /// @notice Execute the deposit (for dynamic amount flow)
