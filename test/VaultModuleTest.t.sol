@@ -55,8 +55,8 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
     address public constant EXTERNAL_VAULT = EXTERNAL_VAULT_A;
 
     uint256 public constant ADMIN_ROLE = 1; // _ROLE_0
-    uint256 public constant WHITELISTED_ROLE = 2; // _ROLE_1
-    uint256 public constant EXECUTOR_ROLE = 2; // _ROLE_1 (same as WHITELISTED_ROLE)
+    uint256 public constant WHITELISTED_ROLE = 4; // _ROLE_2
+    uint256 public constant EXECUTOR_ROLE = 2; // _ROLE_1
     uint256 public constant MANAGER_ROLE = 16; // _ROLE_4
     uint256 public constant EMERGENCY_ADMIN_ROLE = 64; // _ROLE_6
 

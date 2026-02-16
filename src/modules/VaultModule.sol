@@ -31,7 +31,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @notice Role for vault administration (initialization, configuration)
     uint256 public constant ADMIN_ROLE = _ROLE_0;
     /// @notice Role for whitelisted depositors
-    uint256 public constant WHITELISTED_ROLE = _ROLE_1;
+    uint256 public constant WHITELISTED_ROLE = _ROLE_2;
     /// @notice Role for settlement managers
     uint256 public constant MANAGER_ROLE = _ROLE_4;
     /// @notice Role for emergency pause/unpause operations
