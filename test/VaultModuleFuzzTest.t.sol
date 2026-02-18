@@ -71,6 +71,7 @@ contract VaultModuleFuzzTest is BaseTest {
         vm.startPrank(users.admin);
         MetaWallet(payable(_metaWalletProxy)).addFunctions(_vaultSelectors, address(_vault), false);
         VaultModule(_metaWalletProxy).initializeVault(address(USDC_MAINNET), "Meta USDC", "mUSDC");
+        VaultModule(_metaWalletProxy).setMaxAllowedDelta(10_000);
         vm.stopPrank();
 
         metaWallet = IMetaWallet(_metaWalletProxy);
@@ -405,6 +406,9 @@ contract VaultModuleFuzzTest is BaseTest {
         vm.stopPrank();
 
         bytes32 _merkleRoot = keccak256(abi.encodePacked("settlement", _newTotalAssets));
+
+        vm.prank(users.admin);
+        VaultModule(address(metaWallet)).setMaxAllowedDelta(0);
 
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);

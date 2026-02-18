@@ -451,6 +451,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT, _newTotalAssets - _depositAmount));
 
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -584,6 +587,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount + 5000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT, 5000 * _1_USDC));
 
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -629,6 +635,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _loss = 2000 * _1_USDC;
         uint256 _newTotalAssets = _depositAmount - _loss;
         bytes32 _merkleRoot = keccak256(abi.encodePacked("loss"));
+
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
 
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
@@ -931,6 +940,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets - _depositAmount));
 
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -968,6 +980,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount + (_depositAmount * _yieldBps / 10_000);
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
 
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -996,6 +1011,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount * 80 / 100;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
 
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -1023,6 +1041,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
 
         uint256 _settledTotal = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal - _depositAmount));
+
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
 
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
@@ -1060,6 +1081,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
 
         uint256 _settledTotal = _depositAmount + (_depositAmount * _yieldBps / 10_000);
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal));
+
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
 
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
@@ -1361,7 +1385,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         metaWallet.deposit(_depositAmount, users.alice);
         vm.stopPrank();
 
-        // maxAllowedDelta is 0 by default (disabled)
+        // maxAllowedDelta is DEFAULT_MAX_DELTA (1000 BPS = 10%) by default
+        assertEq(metaWallet.maxAllowedDelta(), 1000);
+
+        // Admin explicitly disables delta guard
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(0);
         assertEq(metaWallet.maxAllowedDelta(), 0);
 
         // Settle with 50% increase (would fail if delta was enforced)
