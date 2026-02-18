@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 // External Libraries
 import { Execution, IRegistry, LibCall, MinimalSmartAccount } from "minimal-smart-account/MinimalSmartAccount.sol";
+import { ReentrancyGuard } from "solady/utils/ReentrancyGuard.sol";
 
 // Local Contracts
 import { HookExecution, IHookExecution } from "./HookExecution.sol";
@@ -11,7 +12,7 @@ import { MultiFacetProxy } from "kam/base/MultiFacetProxy.sol";
 /// @title MetaWallet
 /// @notice Minimal smart wallet with advanced multi-hook support
 /// @dev HookExecution can chain together, with each hook's output feeding into the next
-contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
+contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy, ReentrancyGuard {
     using LibCall for address;
 
     /* ///////////////////////////////////////////////////////////////
@@ -45,6 +46,7 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy {
     /// @inheritdoc IHookExecution
     function executeWithHookExecution(HookExecution[] calldata _hookExecutions)
         external
+        nonReentrant
         returns (bytes[] memory _results)
     {
         _authorizeExecute(msg.sender);
