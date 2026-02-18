@@ -44,13 +44,16 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy, Reen
     ///////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHookExecution
-    function executeWithHookExecution(HookExecution[] calldata _hookExecutions)
+    function executeWithHookExecution(
+        uint256 _deadline,
+        HookExecution[] calldata _hookExecutions
+    )
         external
         nonReentrant
         returns (bytes[] memory _results)
     {
         _authorizeExecute(msg.sender);
-        return _executeHookExecution(_hookExecutions);
+        return _executeHookExecution(_deadline, _hookExecutions);
     }
 
     /* ///////////////////////////////////////////////////////////////

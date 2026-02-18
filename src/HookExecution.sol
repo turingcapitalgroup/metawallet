@@ -11,6 +11,7 @@ import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
 
 // Local Errors
 import {
+    HOOKEXECUTION_DEADLINE_EXPIRED,
     HOOKEXECUTION_EMPTY_HOOK_CHAIN,
     HOOKEXECUTION_HOOK_ALREADY_INSTALLED,
     HOOKEXECUTION_HOOK_NOT_INSTALLED,
@@ -109,12 +110,17 @@ abstract contract HookExecution is IHookExecution {
 
     /// @notice Execute a chain of hooks
     /// @dev Each hook builds its own execution logic, and hooks can chain together
+    /// @param _deadline Timestamp after which the transaction reverts
     /// @param _hookExecutions Array of hook executions to execute in sequence
     /// @return _results Final execution results
-    function _executeHookExecution(HookExecution[] calldata _hookExecutions)
+    function _executeHookExecution(
+        uint256 _deadline,
+        HookExecution[] calldata _hookExecutions
+    )
         internal
         returns (bytes[] memory _results)
     {
+        require(block.timestamp <= _deadline, HOOKEXECUTION_DEADLINE_EXPIRED);
         require(_hookExecutions.length > 0, HOOKEXECUTION_EMPTY_HOOK_CHAIN);
 
         Execution[] memory _allExecutions = _buildExecutionChain(_hookExecutions);
