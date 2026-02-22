@@ -742,7 +742,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         bytes32[] memory _leaves = new bytes32[](2);
         _leaves[0] = keccak256(abi.encodePacked(_strategies[0], _values[0]));
         _leaves[1] = keccak256(abi.encodePacked(_strategies[1], _values[1]));
-        bytes32 _merkleRoot = MerkleTreeLib.root(_leaves);
+        bytes32 _merkleRoot = MerkleTreeLib.root(MerkleTreeLib.build(_leaves));
 
         bool _isValid = metaWallet.validateTotalAssets(_strategies, _values, _merkleRoot);
         assertTrue(_isValid);
@@ -940,9 +940,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets - _depositAmount));
 
+<<<<<<< HEAD
+=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -980,9 +983,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount + (_depositAmount * _yieldBps / 10_000);
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
 
+<<<<<<< HEAD
+=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -1011,9 +1017,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount * 80 / 100;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
 
+<<<<<<< HEAD
+=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -1042,9 +1051,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _settledTotal = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal - _depositAmount));
 
+<<<<<<< HEAD
+=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
 
@@ -1082,9 +1094,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _settledTotal = _depositAmount + (_depositAmount * _yieldBps / 10_000);
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal));
 
+<<<<<<< HEAD
+=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
 
@@ -1439,5 +1454,42 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
         assertEq(metaWallet.totalAssets(), _newTotalAssets);
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+              SECTION 16: computeMerkleRoot CORRECTNESS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Verifies computeMerkleRoot commits to ALL strategies, not just the first.
+    function test_ComputeMerkleRoot_CommitsToAllStrategies() public view {
+        address _stratA = address(0xAAAA);
+        address _stratB = address(0xBBBB);
+        uint256 _valueA = 5000 * _1_USDC;
+        uint256 _valueB = 3000 * _1_USDC;
+
+        address[] memory _strategies = new address[](2);
+        uint256[] memory _values = new uint256[](2);
+        _strategies[0] = _stratA;
+        _strategies[1] = _stratB;
+        _values[0] = _valueA;
+        _values[1] = _valueB;
+
+        bytes32 _root1 = metaWallet.computeMerkleRoot(_strategies, _values);
+
+        // Changing strategy B's value MUST change the root
+        _values[1] = 9999 * _1_USDC;
+        bytes32 _root2 = metaWallet.computeMerkleRoot(_strategies, _values);
+        assertNotEq(_root1, _root2);
+
+        // Root must NOT equal leaves[0] for multi-leaf trees
+        bytes32 _leaf0 = keccak256(abi.encodePacked(_stratA, _valueA));
+        assertNotEq(_root1, _leaf0);
+
+        // Root must match MerkleTreeLib.build output
+        bytes32[] memory _leaves = new bytes32[](2);
+        _leaves[0] = keccak256(abi.encodePacked(_stratA, _valueA));
+        _leaves[1] = keccak256(abi.encodePacked(_stratB, _valueB));
+        bytes32 _expectedRoot = MerkleTreeLib.root(MerkleTreeLib.build(_leaves));
+        assertEq(_root1, _expectedRoot);
     }
 }

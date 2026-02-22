@@ -350,7 +350,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
             _leaves[_i] = keccak256(abi.encodePacked(_strategies[_i], _values[_i]));
         }
 
-        return MerkleTreeLib.root(_leaves);
+        return MerkleTreeLib.root(MerkleTreeLib.build(_leaves));
     }
 
     /// @inheritdoc IVaultModule
