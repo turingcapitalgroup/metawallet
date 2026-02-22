@@ -55,8 +55,8 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
     address public constant EXTERNAL_VAULT = EXTERNAL_VAULT_A;
 
     uint256 public constant ADMIN_ROLE = 1; // _ROLE_0
-    uint256 public constant WHITELISTED_ROLE = 2; // _ROLE_1
-    uint256 public constant EXECUTOR_ROLE = 2; // _ROLE_1 (same as WHITELISTED_ROLE)
+    uint256 public constant WHITELISTED_ROLE = 4; // _ROLE_2
+    uint256 public constant EXECUTOR_ROLE = 2; // _ROLE_1
     uint256 public constant MANAGER_ROLE = 16; // _ROLE_4
     uint256 public constant EMERGENCY_ADMIN_ROLE = 64; // _ROLE_6
 
@@ -451,6 +451,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT, _newTotalAssets - _depositAmount));
 
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -584,6 +587,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount + 5000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT, 5000 * _1_USDC));
 
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -630,6 +636,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount - _loss;
         bytes32 _merkleRoot = keccak256(abi.encodePacked("loss"));
 
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -664,7 +673,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
 
         assertEq(metaWallet.totalAssets(), _totalAssetsBefore);
         assertEq(metaWallet.sharePrice(), _sharePriceBefore);
@@ -691,7 +700,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         _investHooks[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_investHooks);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _investHooks);
 
         uint256 _externalShares = IERC4626(EXTERNAL_VAULT).balanceOf(address(metaWallet));
         uint256 _totalIdleBefore = metaWallet.totalIdle();
@@ -708,7 +717,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         _divestHooks[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_divestHooks);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _divestHooks);
 
         uint256 _totalIdleAfter = metaWallet.totalIdle();
         uint256 _externalSharesAfter = IERC4626(EXTERNAL_VAULT).balanceOf(address(metaWallet));
@@ -931,6 +940,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets - _depositAmount));
 
+<<<<<<< HEAD
+=======
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -968,6 +983,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount + (_depositAmount * _yieldBps / 10_000);
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
 
+<<<<<<< HEAD
+=======
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -996,6 +1017,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount * 80 / 100;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
 
+<<<<<<< HEAD
+=======
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -1024,6 +1051,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _settledTotal = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal - _depositAmount));
 
+<<<<<<< HEAD
+=======
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
 
@@ -1061,6 +1094,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _settledTotal = _depositAmount + (_depositAmount * _yieldBps / 10_000);
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal));
 
+<<<<<<< HEAD
+=======
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(10_000);
+
+>>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
 
@@ -1199,7 +1238,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         _hooks[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hooks);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hooks);
     }
 
     function _divestFromStrategy() internal {
@@ -1217,7 +1256,7 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         _hooks[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hooks);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hooks);
     }
 
     function _redeemUserShares(address _user, uint256 _shares) internal returns (uint256) {
@@ -1361,7 +1400,12 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         metaWallet.deposit(_depositAmount, users.alice);
         vm.stopPrank();
 
-        // maxAllowedDelta is 0 by default (disabled)
+        // maxAllowedDelta is DEFAULT_MAX_DELTA (1000 BPS = 10%) by default
+        assertEq(metaWallet.maxAllowedDelta(), 1000);
+
+        // Admin explicitly disables delta guard
+        vm.prank(users.admin);
+        metaWallet.setMaxAllowedDelta(0);
         assertEq(metaWallet.maxAllowedDelta(), 0);
 
         // Settle with 50% increase (would fail if delta was enforced)

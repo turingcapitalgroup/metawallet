@@ -19,7 +19,7 @@ contract ERC7540Test is BaseTest, ERC7540Events, ERC4626Events {
     MinimalUUPSFactory public proxyFactory;
 
     uint256 public constant ADMIN_ROLE = 1;
-    uint256 public constant WHITELISTED_ROLE = 2;
+    uint256 public constant WHITELISTED_ROLE = 4;
 
     function setUp() public {
         _setUp("MAINNET", 23_783_139);

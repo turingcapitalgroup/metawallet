@@ -31,7 +31,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @notice Role for vault administration (initialization, configuration)
     uint256 public constant ADMIN_ROLE = _ROLE_0;
     /// @notice Role for whitelisted depositors
-    uint256 public constant WHITELISTED_ROLE = _ROLE_1;
+    uint256 public constant WHITELISTED_ROLE = _ROLE_2;
     /// @notice Role for settlement managers
     uint256 public constant MANAGER_ROLE = _ROLE_4;
     /// @notice Role for emergency pause/unpause operations
@@ -39,6 +39,8 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @notice Basis points denominator (10000 = 100%)
     uint256 public constant BPS_DENOMINATOR = 10_000;
+    /// @notice Default max allowed delta in BPS (10% = 1000 BPS)
+    uint256 public constant DEFAULT_MAX_DELTA = 1000;
 
     // Struct that holds all state for this module, stored at a single unique slot
     struct VaultModuleStorage {
@@ -105,6 +107,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         (bool success, uint8 result) = _tryGetAssetDecimals(_asset);
         require(success, VAULTMODULE_INVALID_ASSET_DECIMALS);
         $.decimals = result;
+        $.maxAllowedDelta = DEFAULT_MAX_DELTA;
         $.initialized = true;
     }
 
@@ -365,7 +368,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @inheritdoc IModule
     function selectors() external pure returns (bytes4[] memory _selectors) {
-        _selectors = new bytes4[](44);
+        _selectors = new bytes4[](45);
         _selectors[0] = this.DOMAIN_SEPARATOR.selector;
         _selectors[1] = this.allowance.selector;
         _selectors[2] = this.approve.selector;
@@ -410,6 +413,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _selectors[41] = this.computeMerkleRoot.selector;
         _selectors[42] = this.maxAllowedDelta.selector;
         _selectors[43] = this.setMaxAllowedDelta.selector;
+        _selectors[44] = this.setOperator.selector;
         return _selectors;
     }
 }
