@@ -134,6 +134,21 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     }
 
     /// @inheritdoc ERC7540
+    /// @dev Enforces pause check before processing redeem request.
+    function requestRedeem(
+        uint256 shares,
+        address controller,
+        address owner
+    )
+        public
+        override
+        returns (uint256 requestId)
+    {
+        _checkNotPaused();
+        return super.requestRedeem(shares, controller, owner);
+    }
+
+    /// @inheritdoc ERC7540
     /// @dev Updates virtualTotalAssets to track deposited assets.
     function deposit(uint256 assets, address receiver) public override returns (uint256 shares) {
         _checkNotPaused();

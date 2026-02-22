@@ -855,11 +855,7 @@ contract HookChainTest is BaseTest {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_data) });
 
         vm.prank(users.owner);
-<<<<<<< HEAD
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
-=======
         MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
->>>>>>> audit-fixes
     }
 
     /// @notice Helper to execute a redeem via hook execution
@@ -876,10 +872,6 @@ contract HookChainTest is BaseTest {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_data) });
 
         vm.prank(users.owner);
-<<<<<<< HEAD
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_hookExecutions);
-=======
         MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
->>>>>>> audit-fixes
     }
 }

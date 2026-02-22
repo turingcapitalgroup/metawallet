@@ -940,12 +940,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets - _depositAmount));
 
-<<<<<<< HEAD
-=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
->>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -983,12 +980,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount + (_depositAmount * _yieldBps / 10_000);
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
 
-<<<<<<< HEAD
-=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
->>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -1017,12 +1011,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _newTotalAssets = _depositAmount * 80 / 100;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _newTotalAssets));
 
-<<<<<<< HEAD
-=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
->>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
 
@@ -1051,12 +1042,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _settledTotal = 15_000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal - _depositAmount));
 
-<<<<<<< HEAD
-=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
->>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
 
@@ -1094,12 +1082,9 @@ contract VaultModuleTest is BaseTest, ERC7540Events, ERC4626Events {
         uint256 _settledTotal = _depositAmount + (_depositAmount * _yieldBps / 10_000);
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT_A, _settledTotal));
 
-<<<<<<< HEAD
-=======
         vm.prank(users.admin);
         metaWallet.setMaxAllowedDelta(10_000);
 
->>>>>>> audit-fixes
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_settledTotal, _merkleRoot);
 
