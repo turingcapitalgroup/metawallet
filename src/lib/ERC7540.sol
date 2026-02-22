@@ -127,9 +127,12 @@ abstract contract ERC7540 is ERC4626 {
     }
 
     /// @inheritdoc ERC4626
-    /// @dev Limited by the claimable deposit requests of the controller
+    /// @dev Limited by the claimable deposit requests of the controller.
+    ///      Uses the frozen shares from the filled request (not the live vault rate)
+    ///      to stay consistent with the unchecked subtraction in _deposit().
     function maxMint(address to) public view virtual override returns (uint256 shares) {
-        return convertToShares(maxDeposit(to));
+        ERC7540Storage storage $ = _getERC7540Storage();
+        return $.claimableDepositRequest[to].shares;
     }
 
     /// @inheritdoc ERC4626
