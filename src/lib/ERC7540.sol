@@ -205,7 +205,7 @@ abstract contract ERC7540 is ERC4626 {
         ERC7540Storage storage $ = _getERC7540Storage();
         if (assets > maxDeposit(controller)) revert DepositMoreThanMax();
         ERC7540_FilledRequest memory claimable = $.claimableDepositRequest[controller];
-        shares = claimable.convertToSharesUp(assets);
+        shares = claimable.convertToShares(assets);
         (shares,) = _deposit(assets, shares, receiver, controller);
     }
 
