@@ -2,17 +2,17 @@
 pragma solidity ^0.8.20;
 
 import { OwnableRoles } from "solady/auth/OwnableRoles.sol";
+import { ERC4626 } from "solady/tokens/ERC4626.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
+import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 import { IModule } from "kam/interfaces/modules/IModule.sol";
 import { IVaultModule } from "metawallet/src/interfaces/IVaultModule.sol";
 
-import { ERC7540, SafeTransferLib } from "../lib/ERC7540.sol";
-
-// Local Errors
 import {
     VAULTMODULE_ALREADY_INITIALIZED,
     VAULTMODULE_DELTA_EXCEEDS_MAX,
+    VAULTMODULE_INSUFFICIENT_IDLE,
     VAULTMODULE_INVALID_ASSET_DECIMALS,
     VAULTMODULE_INVALID_BPS,
     VAULTMODULE_MISMATCHED_ARRAYS,
@@ -22,7 +22,7 @@ import {
 /// @title VaultModule
 /// @notice A module for managing vault assets with virtual totalAssets tracking.
 /// All state is stored in a single, unique storage slot to prevent collisions.
-contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
+contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule {
     using SafeTransferLib for address;
 
     /* //////////////////////////////////////////////////////////////
@@ -31,7 +31,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
     /// @notice Role for vault administration (initialization, configuration)
     uint256 public constant ADMIN_ROLE = _ROLE_0;
     /// @notice Role for whitelisted depositors
-    uint256 public constant WHITELISTED_ROLE = _ROLE_1;
+    uint256 public constant WHITELISTED_ROLE = _ROLE_2;
     /// @notice Role for settlement managers
     uint256 public constant MANAGER_ROLE = _ROLE_4;
     /// @notice Role for emergency pause/unpause operations
@@ -39,10 +39,11 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @notice Basis points denominator (10000 = 100%)
     uint256 public constant BPS_DENOMINATOR = 10_000;
+    /// @notice Default max allowed delta in BPS (10% = 1000 BPS)
+    uint256 public constant DEFAULT_MAX_DELTA = 1000;
 
-    // Struct that holds all state for this module, stored at a single unique slot
     struct VaultModuleStorage {
-        uint256 virtualTotalAssets; // Virtual total assets, updated on deposit/redeem
+        uint256 virtualTotalAssets;
         bytes32 merkleRoot;
         bool initialized;
         bool paused;
@@ -50,7 +51,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         string name;
         string symbol;
         uint8 decimals;
-        uint256 maxAllowedDelta; // Max allowed delta in BPS (10000 = 100%)
+        uint256 maxAllowedDelta;
     }
 
     // keccak256(abi.encode(uint256(keccak256("metawallet.storage.VaultModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -105,120 +106,15 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         (bool success, uint8 result) = _tryGetAssetDecimals(_asset);
         require(success, VAULTMODULE_INVALID_ASSET_DECIMALS);
         $.decimals = result;
+        $.maxAllowedDelta = DEFAULT_MAX_DELTA;
         $.initialized = true;
     }
 
     /* //////////////////////////////////////////////////////////////
-                         ERC7540 Logic
+                         ERC4626 OVERRIDES
     //////////////////////////////////////////////////////////////*/
 
-    /// @inheritdoc ERC7540
-    /// @dev Immediately fulfills the deposit request after submission.
-    function requestDeposit(
-        uint256 assets,
-        address controller,
-        address owner
-    )
-        public
-        override
-        returns (uint256 requestId)
-    {
-        _checkWhitelistedRole();
-        _checkNotPaused();
-        if (owner != msg.sender) revert InvalidOperator();
-        requestId = super.requestDeposit(assets, controller, owner);
-        _fulfillDepositRequest(controller, assets, convertToShares(assets));
-    }
-
-    /// @inheritdoc ERC7540
-    /// @dev Updates virtualTotalAssets to track deposited assets.
-    function deposit(uint256 assets, address receiver) public override returns (uint256 shares) {
-        _checkNotPaused();
-        shares = super.deposit(assets, receiver, msg.sender);
-        _getVaultModuleStorage().virtualTotalAssets += assets;
-    }
-
-    /// @inheritdoc ERC7540
-    /// @dev Updates virtualTotalAssets to track deposited assets.
-    function deposit(uint256 assets, address receiver, address controller) public override returns (uint256 shares) {
-        _checkNotPaused();
-        shares = super.deposit(assets, receiver, controller);
-        _getVaultModuleStorage().virtualTotalAssets += assets;
-    }
-
-    /// @inheritdoc ERC7540
-    function mint(uint256 shares, address receiver) public override returns (uint256 assets) {
-        _checkNotPaused();
-        return mint(shares, receiver, msg.sender);
-    }
-
-    /// @inheritdoc ERC7540
-    /// @dev Updates virtualTotalAssets to track minted assets.
-    function mint(uint256 shares, address receiver, address controller) public override returns (uint256 assets) {
-        _checkNotPaused();
-        assets = super.mint(shares, receiver, controller);
-        _getVaultModuleStorage().virtualTotalAssets += assets;
-    }
-
-    /// @inheritdoc ERC7540
-    /// @dev Limited by both idle assets and pending redeem requests.
-    function maxRedeem(address owner) public view override returns (uint256 shares) {
-        uint256 _totalIdleShares = convertToShares(totalIdle());
-        uint256 pendingShares = super.pendingRedeemRequest(owner);
-        return _totalIdleShares >= pendingShares ? pendingShares : _totalIdleShares;
-    }
-
-    /// @inheritdoc ERC7540
-    /// @dev Subtracts claimable shares from the total pending amount.
-    function pendingRedeemRequest(address controller) public view override returns (uint256) {
-        uint256 pending = super.pendingRedeemRequest(controller);
-        return pending - maxRedeem(controller);
-    }
-
-    /// @inheritdoc ERC7540
-    /// @dev Updates virtualTotalAssets to track withdrawn assets.
-    function redeem(uint256 shares, address to, address controller) public virtual override returns (uint256 assets) {
-        _checkNotPaused();
-        _validateController(controller);
-        if (shares > maxRedeem(controller)) revert RedeemMoreThanMax();
-        assets = convertToAssets(shares);
-        _fulfillRedeemRequest(shares, assets, controller, true);
-        (assets,) = _withdraw(assets, shares, to, controller);
-        _getVaultModuleStorage().virtualTotalAssets -= assets;
-    }
-
-    /// @inheritdoc ERC7540
-    /// @dev Updates virtualTotalAssets to track withdrawn assets.
-    function withdraw(uint256 assets, address to, address controller) public virtual override returns (uint256 shares) {
-        _checkNotPaused();
-        _validateController(controller);
-        if (assets > maxWithdraw(controller)) revert WithdrawMoreThanMax();
-        shares = convertToShares(assets);
-        _fulfillRedeemRequest(shares, assets, controller, true);
-        (, shares) = _withdraw(assets, shares, to, controller);
-        _getVaultModuleStorage().virtualTotalAssets -= assets;
-    }
-
-    /// @dev Burns shares from the vault before delegating to ERC7540._withdraw
-    function _withdraw(
-        uint256 assets,
-        uint256 shares,
-        address receiver,
-        address controller
-    )
-        internal
-        override
-        returns (uint256 assetsReturn, uint256 sharesReturn)
-    {
-        _burn(address(this), shares);
-        return super._withdraw(assets, shares, receiver, controller);
-    }
-
-    /* //////////////////////////////////////////////////////////////
-                         PUBLIC GETTERS
-    //////////////////////////////////////////////////////////////*/
-
-    /// @notice Returns the address of the underlying asset.
+    /// @inheritdoc ERC4626
     function asset() public view override returns (address) {
         return _getVaultModuleStorage().asset;
     }
@@ -233,28 +129,90 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         return _getVaultModuleStorage().symbol;
     }
 
-    /// @notice Returns the decimals of the token.
+    /// @inheritdoc ERC4626
     function decimals() public view override returns (uint8) {
         return _getVaultModuleStorage().decimals;
     }
+
+    /// @inheritdoc ERC4626
+    /// @dev Returns virtualTotalAssets rather than actual balance, updated on deposit/redeem/settlement.
+    function totalAssets() public view override returns (uint256) {
+        return _getVaultModuleStorage().virtualTotalAssets;
+    }
+
+    /// @inheritdoc ERC4626
+    /// @dev Enforces WHITELISTED_ROLE and not paused. Updates virtualTotalAssets.
+    function deposit(uint256 assets, address receiver) public override returns (uint256 shares) {
+        _checkWhitelistedRole();
+        _checkNotPaused();
+        shares = super.deposit(assets, receiver);
+        _getVaultModuleStorage().virtualTotalAssets += assets;
+    }
+
+    /// @inheritdoc ERC4626
+    /// @dev Enforces WHITELISTED_ROLE and not paused. Updates virtualTotalAssets.
+    function mint(uint256 shares, address receiver) public override returns (uint256 assets) {
+        _checkWhitelistedRole();
+        _checkNotPaused();
+        assets = super.mint(shares, receiver);
+        _getVaultModuleStorage().virtualTotalAssets += assets;
+    }
+
+    /// @inheritdoc ERC4626
+    /// @dev Enforces not paused. Updates virtualTotalAssets.
+    function redeem(uint256 shares, address to, address owner) public override returns (uint256 assets) {
+        _checkNotPaused();
+        assets = convertToAssets(shares);
+        require(assets <= totalIdle(), VAULTMODULE_INSUFFICIENT_IDLE);
+        assets = super.redeem(shares, to, owner);
+        _getVaultModuleStorage().virtualTotalAssets -= assets;
+    }
+
+    /// @inheritdoc ERC4626
+    /// @dev Enforces not paused. Updates virtualTotalAssets.
+    function withdraw(uint256 assets, address to, address owner) public override returns (uint256 shares) {
+        _checkNotPaused();
+        require(assets <= totalIdle(), VAULTMODULE_INSUFFICIENT_IDLE);
+        shares = super.withdraw(assets, to, owner);
+        _getVaultModuleStorage().virtualTotalAssets -= assets;
+    }
+
+    /// @inheritdoc ERC4626
+    function maxDeposit(address) public view override returns (uint256) {
+        return _getVaultModuleStorage().paused ? 0 : type(uint256).max;
+    }
+
+    /// @inheritdoc ERC4626
+    function maxMint(address) public view override returns (uint256) {
+        return _getVaultModuleStorage().paused ? 0 : type(uint256).max;
+    }
+
+    /// @inheritdoc ERC4626
+    function maxRedeem(address owner) public view override returns (uint256) {
+        uint256 _ownerShares = balanceOf(owner);
+        uint256 _idleShares = convertToShares(totalIdle());
+        return _ownerShares < _idleShares ? _ownerShares : _idleShares;
+    }
+
+    /// @inheritdoc ERC4626
+    function maxWithdraw(address owner) public view override returns (uint256) {
+        uint256 _ownerAssets = convertToAssets(balanceOf(owner));
+        uint256 _idle = totalIdle();
+        return _ownerAssets < _idle ? _ownerAssets : _idle;
+    }
+
+    /* //////////////////////////////////////////////////////////////
+                         PUBLIC GETTERS
+    //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IVaultModule
     function sharePrice() public view returns (uint256) {
         return convertToAssets(10 ** decimals());
     }
 
-    /// @inheritdoc ERC7540
-    /// @dev Returns virtualTotalAssets rather than actual balance, updated on deposit/redeem/settlement.
-    function totalAssets() public view override returns (uint256 _assets) {
-        return _getVaultModuleStorage().virtualTotalAssets;
-    }
-
     /// @inheritdoc IVaultModule
     function totalIdle() public view returns (uint256) {
-        uint256 _balance = asset().balanceOf(address(this));
-        uint256 _pending = totalPendingDepositRequests();
-        if (_balance <= _pending) return 0;
-        return _balance - _pending;
+        return asset().balanceOf(address(this));
     }
 
     /// @inheritdoc IVaultModule
@@ -347,7 +305,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
             _leaves[_i] = keccak256(abi.encodePacked(_strategies[_i], _values[_i]));
         }
 
-        return MerkleTreeLib.root(_leaves);
+        return MerkleTreeLib.root(MerkleTreeLib.build(_leaves));
     }
 
     /// @inheritdoc IVaultModule
@@ -365,7 +323,7 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
 
     /// @inheritdoc IModule
     function selectors() external pure returns (bytes4[] memory _selectors) {
-        _selectors = new bytes4[](44);
+        _selectors = new bytes4[](40);
         _selectors[0] = this.DOMAIN_SEPARATOR.selector;
         _selectors[1] = this.allowance.selector;
         _selectors[2] = this.approve.selector;
@@ -374,12 +332,12 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _selectors[5] = this.convertToAssets.selector;
         _selectors[6] = this.convertToShares.selector;
         _selectors[7] = this.decimals.selector;
-        _selectors[8] = bytes4(abi.encodeWithSignature("deposit(uint256,address)"));
+        _selectors[8] = this.deposit.selector;
         _selectors[9] = this.maxDeposit.selector;
         _selectors[10] = this.maxMint.selector;
         _selectors[11] = this.maxRedeem.selector;
         _selectors[12] = this.maxWithdraw.selector;
-        _selectors[13] = bytes4(abi.encodeWithSignature("mint(uint256,address)"));
+        _selectors[13] = this.mint.selector;
         _selectors[14] = this.name.selector;
         _selectors[15] = this.nonces.selector;
         _selectors[16] = this.permit.selector;
@@ -393,23 +351,19 @@ contract VaultModule is IVaultModule, ERC7540, OwnableRoles, IModule {
         _selectors[24] = this.validateTotalAssets.selector;
         _selectors[25] = this.merkleRoot.selector;
         _selectors[26] = this.settleTotalAssets.selector;
-        _selectors[27] = this.requestDeposit.selector;
-        _selectors[28] = this.requestRedeem.selector;
-        _selectors[29] = this.totalIdle.selector;
-        _selectors[30] = this.initializeVault.selector;
-        _selectors[31] = this.claimableDepositRequest.selector;
-        _selectors[32] = this.claimableRedeemRequest.selector;
-        _selectors[33] = this.pendingDepositRequest.selector;
-        _selectors[34] = this.pendingRedeemRequest.selector;
-        _selectors[35] = this.sharePrice.selector;
-        _selectors[36] = this.paused.selector;
-        _selectors[37] = this.pause.selector;
-        _selectors[38] = this.unpause.selector;
-        _selectors[39] = bytes4(abi.encodeWithSignature("deposit(uint256,address,address)"));
-        _selectors[40] = bytes4(abi.encodeWithSignature("mint(uint256,address,address)"));
-        _selectors[41] = this.computeMerkleRoot.selector;
-        _selectors[42] = this.maxAllowedDelta.selector;
-        _selectors[43] = this.setMaxAllowedDelta.selector;
+        _selectors[27] = this.totalIdle.selector;
+        _selectors[28] = this.initializeVault.selector;
+        _selectors[29] = this.sharePrice.selector;
+        _selectors[30] = this.paused.selector;
+        _selectors[31] = this.pause.selector;
+        _selectors[32] = this.unpause.selector;
+        _selectors[33] = this.computeMerkleRoot.selector;
+        _selectors[34] = this.maxAllowedDelta.selector;
+        _selectors[35] = this.setMaxAllowedDelta.selector;
+        _selectors[36] = this.previewDeposit.selector;
+        _selectors[37] = this.previewMint.selector;
+        _selectors[38] = this.previewWithdraw.selector;
+        _selectors[39] = this.previewRedeem.selector;
         return _selectors;
     }
 }

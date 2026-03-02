@@ -36,9 +36,15 @@ interface IHookExecution {
 
     /// @notice Execute a chain of hooks
     /// @dev Each hook builds its own execution logic, and hooks can chain together
+    /// @param deadline Timestamp after which the transaction reverts
     /// @param hookExecutions Array of hook executions to execute in sequence
     /// @return Final execution results
-    function executeWithHookExecution(HookExecution[] calldata hookExecutions) external returns (bytes[] memory);
+    function executeWithHookExecution(
+        uint256 deadline,
+        HookExecution[] calldata hookExecutions
+    )
+        external
+        returns (bytes[] memory);
 
     /// @notice Get a hook address by identifier (external)
     /// @param hookId The hook identifier

@@ -45,7 +45,7 @@ interface IVaultModule {
     function maxAllowedDelta() external view returns (uint256);
 
     /// @notice Sets the maximum allowed delta for settlement
-    /// @param _maxAllowedDelta The max delta in BPS (10000 = 100%, 0 = disabled)
+    /// @param _maxAllowedDelta The max delta in BPS (10000 = 100%)
     function setMaxAllowedDelta(uint256 _maxAllowedDelta) external;
 
     /// @notice Directly settles the total assets and merkle root
