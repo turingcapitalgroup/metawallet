@@ -22,6 +22,7 @@ string constant VAULTMODULE_PAUSED = "VM3";
 string constant VAULTMODULE_MISMATCHED_ARRAYS = "VM4";
 string constant VAULTMODULE_DELTA_EXCEEDS_MAX = "VM5";
 string constant VAULTMODULE_INVALID_BPS = "VM6";
+string constant VAULTMODULE_INSUFFICIENT_IDLE = "VM7";
 
 // ERC4626ApproveAndDepositHook Errors
 string constant HOOK4626DEPOSIT_INVALID_HOOK_DATA = "H4D1";
