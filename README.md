@@ -1,12 +1,12 @@
 # MetaWallet
 
-A hybrid smart contract combining the benefits of an ERC-7540 async vault with the flexibility of a smart wallet for fund management.
+A hybrid smart contract combining the benefits of an ERC-4626 tokenized vault with the flexibility of a smart wallet for fund management.
 
 ## Overview
 
 MetaWallet enables institutional fund managers to operate a vault that accepts user deposits while maintaining full flexibility to deploy capital across DeFi strategies. It features:
 
-- **ERC-7540 Vault**: Async deposit/redeem flow with share-based accounting
+- **ERC-4626 Vault**: Standard deposit/redeem flow with share-based accounting
 - **Smart Wallet**: Arbitrary execution capabilities for strategy management
 - **Virtual Accounting**: `totalAssets` remains stable during invest/divest operations
 - **Hook System**: Modular, chainable hooks for strategy interactions
@@ -36,7 +36,7 @@ MetaWallet enables institutional fund managers to operate a vault that accepts u
                     ┌────────────┴────────────┐
                     ▼                         ▼
               VaultModule                   Hooks
-         (ERC7540 + accounting)     (ERC4626, 1inch Swap)
+         (ERC4626 + accounting)     (ERC4626, 1inch Swap)
 ```
 
 ### Core Components
@@ -44,7 +44,7 @@ MetaWallet enables institutional fund managers to operate a vault that accepts u
 | Component | Description |
 |-----------|-------------|
 | `MetaWallet.sol` | Main contract inheriting wallet + vault + hook capabilities |
-| `VaultModule.sol` | ERC-7540 vault logic with virtual totalAssets tracking |
+| `VaultModule.sol` | ERC-4626 vault logic with virtual totalAssets tracking |
 | `HookExecution.sol` | Multi-hook execution system for strategy operations |
 | `ERC4626ApproveAndDepositHook.sol` | Hook for investing into ERC-4626 vaults |
 | `ERC4626RedeemHook.sol` | Hook for divesting from ERC-4626 vaults |
@@ -56,7 +56,7 @@ MetaWallet uses a minimalistic virtual accounting model:
 
 ```
 totalAssets = virtualTotalAssets (stored value)
-totalIdle   = asset.balanceOf(vault) - pendingDeposits
+totalIdle   = asset.balanceOf(vault)
 ```
 
 ### Key Properties
@@ -73,7 +73,7 @@ This design ensures share price stability during strategy operations, which is c
 | Role | Permissions |
 |------|-------------|
 | `ADMIN_ROLE` | Install/uninstall hooks, add modules, initialize vault |
-| `WHITELISTED_ROLE` | Call `requestDeposit` on the vault |
+| `WHITELISTED_ROLE` | Call `deposit` on the vault |
 | `EXECUTOR_ROLE` | Execute wallet operations via hooks |
 | `MANAGER_ROLE` | Settle total assets and merkle roots |
 | `EMERGENCY_ADMIN_ROLE` | Pause/unpause the vault |
@@ -85,20 +85,14 @@ This design ensures share price stability during strategy operations, which is c
 ### Depositing
 
 ```solidity
-// 1. Request deposit (transfers USDC to vault)
-vault.requestDeposit(1000e6, user, user);
-
-// 2. Claim shares (instantly fulfilled)
+// Deposit USDC and receive shares
 vault.deposit(1000e6, user);
 ```
 
 ### Redeeming
 
 ```solidity
-// 1. Request redemption (transfers shares to vault)
-vault.requestRedeem(shares, user, user);
-
-// 2. Claim assets (limited by totalIdle)
+// Redeem shares for USDC (limited by totalIdle)
 vault.redeem(shares, user, user);
 ```
 

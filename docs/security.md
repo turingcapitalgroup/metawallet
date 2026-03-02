@@ -13,7 +13,7 @@ MetaWallet uses Solady's `OwnableRoles` for role management. Roles are bitmask-b
 | Role | Constant | Slot | Bitmask Value | Description |
 |------|----------|------|---------------|-------------|
 | Admin | `ADMIN_ROLE` | `_ROLE_0` | 1 | Full administrative control |
-| Whitelisted | `WHITELISTED_ROLE` | `_ROLE_1` | 2 | Deposit access (requestDeposit) |
+| Whitelisted | `WHITELISTED_ROLE` | `_ROLE_1` | 2 | Deposit access (deposit) |
 | Manager | `MANAGER_ROLE` | `_ROLE_4` | 16 | Settlement operations |
 | Emergency Admin | `EMERGENCY_ADMIN_ROLE` | `_ROLE_6` | 64 | Pause/unpause vault |
 
@@ -26,7 +26,7 @@ MetaWallet uses Solady's `OwnableRoles` for role management. Roles are bitmask-b
 - Set the maximum allowed settlement delta (`setMaxAllowedDelta`)
 
 **WHITELISTED_ROLE (`_ROLE_1 = 2`)**
-- Call `requestDeposit` on the vault
+- Call `deposit` on the vault
 - This role controls who can initiate deposits into the vault
 
 **MANAGER_ROLE (`_ROLE_4 = 16`)**
@@ -42,7 +42,7 @@ MetaWallet uses Solady's `OwnableRoles` for role management. Roles are bitmask-b
 `WHITELISTED_ROLE` and `EXECUTOR_ROLE` (from `MinimalSmartAccount`) both map to `_ROLE_1`. Since Solady roles are bitmask-based, granting one automatically grants the other. This means:
 
 - Any address whitelisted for deposits can also execute wallet operations via `executeWithHookExecution`.
-- Any executor can also call `requestDeposit`.
+- Any executor can also call `deposit`.
 
 This is a deliberate design decision. Operators interacting with the system need both capabilities: submitting deposits on behalf of users and executing strategy operations.
 
@@ -216,7 +216,6 @@ The following functions check `_checkNotPaused()` and revert with `VM3` when pau
 | `mint(uint256, address, address)` | Blocked |
 | `redeem(uint256, address, address)` | Blocked |
 | `withdraw(uint256, address, address)` | Blocked |
-| `requestDeposit(uint256, address, address)` | Blocked |
 
 ### Scope -- What Remains Active During Pause
 
@@ -224,13 +223,11 @@ The following functions are intentionally NOT paused:
 
 | Function | Rationale |
 |----------|-----------|
-| `requestRedeem` | Allows users to queue redemption requests even during emergencies. Users should always be able to signal their intent to withdraw. |
 | `settleTotalAssets` | Allows the manager to update accounting during a pause. This is critical for reflecting losses or position changes that may have triggered the pause in the first place. |
 
 ### Design Rationale
 
-The pause mechanism is designed to halt user-facing operations (deposits and claims) while preserving the ability to:
-- Accept redemption requests (protecting user withdrawal rights)
+The pause mechanism is designed to halt user-facing operations (deposits and redemptions) while preserving the ability to:
 - Update accounting (reflecting real-world state changes)
 - Execute management operations if needed for recovery
 
