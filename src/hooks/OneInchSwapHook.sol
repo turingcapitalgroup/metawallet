@@ -18,6 +18,7 @@ import {
     HOOKONEINCH_INVALID_HOOK_DATA,
     HOOKONEINCH_INVALID_ROUTER,
     HOOKONEINCH_PREVIOUS_HOOK_NOT_FOUND,
+    HOOKONEINCH_RESIDUAL_SOURCE_TOKENS,
     HOOKONEINCH_ROUTER_NOT_ALLOWED
 } from "metawallet/src/errors/Errors.sol";
 
@@ -359,9 +360,19 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         uint256 _value = _tempValue;
         bytes memory _calldata = _tempSwapCalldata;
 
+        // Snapshot source token balance before swap
+        address _srcToken = _ctx.srcToken;
+        uint256 _srcBalBefore = _srcToken != NATIVE_ETH ? IERC20(_srcToken).balanceOf(address(this)) : 0;
+
         // Execute the swap - this will pull tokens from this hook via transferFrom
         (bool success,) = _router.call{ value: _value }(_calldata);
         require(success, HOOKONEINCH_INVALID_HOOK_DATA);
+
+        // Revert if source tokens remain stranded (calldata amount < dynamic amount)
+        if (_srcToken != NATIVE_ETH) {
+            uint256 _srcBalAfter = IERC20(_srcToken).balanceOf(address(this));
+            require(_srcBalAfter <= _srcBalBefore - _ctx.amountIn, HOOKONEINCH_RESIDUAL_SOURCE_TOKENS);
+        }
 
         _ctx.amountOut = IERC20(_ctx.dstToken).balanceOf(_receiver) - _balBefore;
         _ctx.receiver = _receiver;

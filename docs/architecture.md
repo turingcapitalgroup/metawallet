@@ -4,7 +4,7 @@
 
 1. [System Overview](#1-system-overview)
 2. [Inheritance Architecture](#2-inheritance-architecture)
-3. [Vault Module (ERC-7540)](#3-vault-module-erc-7540)
+3. [Vault Module (ERC-4626)](#3-vault-module-erc-4626)
 4. [Hook System](#4-hook-system)
 5. [Accounting Model](#5-accounting-model)
 6. [Security Architecture](#6-security-architecture)
@@ -15,7 +15,7 @@
 
 ## 1. System Overview
 
-MetaWallet is a hybrid smart wallet that merges a minimal smart account with an ERC-7540 asynchronous tokenized vault. It is designed for institutional fund managers who need to:
+MetaWallet is a hybrid smart wallet that merges a minimal smart account with an ERC-4626 tokenized vault. It is designed for institutional fund managers who need to:
 
 - Operate a tokenized vault that accepts deposits and redemptions from whitelisted investors.
 - Deploy the vault's idle capital into external DeFi strategies (lending protocols, liquidity pools, yield vaults) through composable hook chains.
@@ -41,8 +41,8 @@ The core insight is that a vault and the wallet that manages its capital are the
 |                                                                    |
 |  Facet Module (delegatecall target):                               |
 |  +---------------------------------------------------------------+ |
-|  |                     VaultModule (ERC-7540)                     | |
-|  |  ERC20 shares | async deposit/redeem | settlement | merkle    | |
+|  |                     VaultModule (ERC-4626)                     | |
+|  |  ERC20 shares | deposit/redeem | settlement | merkle          | |
 |  +---------------------------------------------------------------+ |
 +--------------------------------------------------------------------+
 ```
@@ -115,68 +115,54 @@ Source: `dependencies/kam-1.0/src/base/MultiFacetProxy.sol`
 
 A selector-based proxy (similar to EIP-2535 Diamond, but simplified) that maps `bytes4` function selectors to implementation contract addresses. When a call arrives whose selector is not defined on MetaWallet itself, the Solidity `fallback()` inherited from OpenZeppelin's `Proxy` triggers `_implementation()`, which looks up the target in the `selectorToImplementation` mapping and performs a `delegatecall`.
 
-This is how the VaultModule's 44 function selectors (ERC-20, ERC-4626, ERC-7540, settlement, pause, etc.) are exposed on the MetaWallet address without bloating the main contract.
+This is how the VaultModule's function selectors (ERC-20, ERC-4626, settlement, pause, etc.) are exposed on the MetaWallet address without bloating the main contract.
 
 ---
 
-## 3. Vault Module (ERC-7540)
+## 3. Vault Module (ERC-4626)
 
 Source: `src/modules/VaultModule.sol`
 
 ### 3.1 Installation as a Facet
 
-VaultModule is deployed as a standalone contract and then "installed" into MetaWallet by calling `addFunctions(selectors, vaultModuleAddress, false)`. The module exposes its 44 selectors via the `selectors()` function (implementing `IModule`). After installation, any call to these selectors on the MetaWallet proxy address is delegatecalled into VaultModule, executing against MetaWallet's storage.
+VaultModule is deployed as a standalone contract and then "installed" into MetaWallet by calling `addFunctions(selectors, vaultModuleAddress, false)`. The module exposes its selectors via the `selectors()` function (implementing `IModule`). After installation, any call to these selectors on the MetaWallet proxy address is delegatecalled into VaultModule, executing against MetaWallet's storage.
 
 ### 3.2 Inheritance Chain
 
 ```
 VaultModule
-  |-- ERC7540 (async deposit/redeem layer)
-  |     |-- ERC4626 (Solady -- share math, ERC-20 token)
+  |-- ERC4626 (Solady -- share math, ERC-20 token, deposit/redeem)
   |-- OwnableRoles (Solady -- role checks run against MetaWallet's OwnableRoles storage)
   |-- IModule (exposes selectors() for facet registration)
 ```
 
-### 3.3 Async Deposit Flow (ERC-7540)
+### 3.3 Deposit Flow (ERC-4626)
 
 ```
 Investor                    MetaWallet (VaultModule facet)
    |                                    |
-   |-- requestDeposit(assets, ctrl, owner) -->|
+   |-- deposit(assets, receiver) ------>|
    |   [WHITELISTED_ROLE required]      |
    |   [transfers assets into vault]    |
-   |   [creates pending request]        |
-   |   [immediately fulfills request]   |
-   |                                    |
-   |-- deposit(assets, receiver) ------>|
    |   [mints shares to receiver]       |
    |   [virtualTotalAssets += assets]   |
    |<-- shares -------------------------|
 ```
 
-The VaultModule's `requestDeposit` immediately calls `_fulfillDepositRequest`, making the flow synchronous in practice while preserving ERC-7540 interface compliance. This allows future upgrades to introduce actual async settlement without changing the external API.
-
-### 3.4 Async Redeem Flow (ERC-7540)
+### 3.4 Redeem Flow (ERC-4626)
 
 ```
 Investor                    MetaWallet (VaultModule facet)
    |                                    |
-   |-- requestRedeem(shares, ctrl, owner) -->|
-   |   [transfers shares to vault]      |
-   |   [creates pending redeem request] |
-   |                                    |
-   |   ... (manager fulfills when       |
-   |        idle assets available) ...  |
-   |                                    |
-   |-- redeem(shares, to, controller) ->|
-   |   [limited by min(idle, pending)]  |
-   |   [burns shares held by vault]     |
+   |-- redeem(shares, to, owner) ------>|
+   |   [limited by totalIdle]           |
+   |   [burns shares from owner]        |
    |   [transfers assets to receiver]   |
    |   [virtualTotalAssets -= assets]   |
    |<-- assets -------------------------|
 ```
 
-Redemptions are gated by `maxRedeem`, which returns the minimum of (a) shares convertible from `totalIdle()` and (b) the controller's pending redeem request. This ensures the vault never sends more assets than it holds in idle.
+Redemptions are gated by `maxRedeem`, which returns the shares convertible from `totalIdle()`. This ensures the vault never sends more assets than it holds in idle.
 
 ### 3.5 ERC-7201 Storage
 
@@ -192,6 +178,7 @@ struct VaultModuleStorage {
     uint8   decimals;
     uint256 maxAllowedDelta;
 }
+// Namespace: metawallet.storage.VaultModule
 // Slot: 0x511216ea87b3ec844059069c7b970c812573d49674957e6b4ccb340e8aff7200
 ```
 
@@ -327,7 +314,7 @@ The vault uses a `virtualTotalAssets` counter instead of reading `balanceOf(addr
 
 ```
 totalAssets() returns virtualTotalAssets   (NOT balanceOf)
-totalIdle()  returns balanceOf(asset) - totalPendingDepositRequests
+totalIdle()  returns balanceOf(asset)
 ```
 
 ### 5.2 When virtualTotalAssets Changes
@@ -383,12 +370,12 @@ MetaWallet uses Solady's `OwnableRoles` for gas-efficient bitmap-based role mana
 | Role | Constant | Bit | Purpose |
 |---|---|---|---|
 | ADMIN | `_ROLE_0` | `1 << 0` | Install/uninstall hooks, install facets, initialize vault, set maxAllowedDelta |
-| WHITELISTED | `_ROLE_1` | `1 << 1` | Submit deposit requests (investor whitelist) |
+| WHITELISTED | `_ROLE_1` | `1 << 1` | Deposit into the vault (investor whitelist) |
 | EXECUTOR | `_ROLE_1` * | `1 << 1` | Execute transactions via `execute()` and `executeWithHookExecution()` |
 | MANAGER | `_ROLE_4` | `1 << 4` | Call `settleTotalAssets` to update accounting |
 | EMERGENCY_ADMIN | `_ROLE_6` | `1 << 6` | Pause and unpause the vault |
 
-\* Note: In `MinimalSmartAccount`, EXECUTOR_ROLE is `_ROLE_1`. In `VaultModule`, WHITELISTED_ROLE is also `_ROLE_1`. Since VaultModule runs via delegatecall in MetaWallet's storage context, both share the same OwnableRoles bitmap. The EXECUTOR_ROLE and WHITELISTED_ROLE occupy the same bit position, meaning any address granted executor permission is also whitelisted, and vice versa.
+\* Note: In `MinimalSmartAccount`, EXECUTOR_ROLE is `_ROLE_1`. In `VaultModule`, WHITELISTED_ROLE is also `_ROLE_1`. Since VaultModule runs via delegatecall in MetaWallet's storage context, both share the same OwnableRoles bitmap. The EXECUTOR_ROLE and WHITELISTED_ROLE occupy the same bit position, meaning any address granted executor permission can also deposit, and vice versa.
 
 ### 6.2 Registry Authorization
 
@@ -436,7 +423,6 @@ function unpause() external { _checkEmergencyAdminRole(); $.paused = false; }
 ```
 
 When paused, the following operations are blocked:
-- `requestDeposit`
 - `deposit` / `mint`
 - `redeem` / `withdraw`
 
@@ -490,7 +476,6 @@ MetaWallet uses ERC-7201 (namespaced storage) across all contracts to prevent st
 | `HookExecution` | `metawallet.storage.HookExecution` | `0x84561f58...9100` | hooks mapping, hookIds set |
 | `MultiFacetProxy` | `kam.storage.MultiFacetProxy` | `0xfeaf205b...2d00` | selectorToImplementation mapping |
 | `VaultModule` | `metawallet.storage.VaultModule` | `0x511216ea...7200` | virtualTotalAssets, merkleRoot, paused, asset, name, symbol, decimals, maxAllowedDelta |
-| `ERC7540` | `metawallet.storage.erc7540` | `0x1f258c11...ff00` | pendingDepositRequest, pendingRedeemRequest, claimableDepositRequest, claimableRedeemRequest, isOperator, totalPendingDepositRequests |
 | `OwnableRoles` | *(Solady built-in)* | *(Solady slots)* | owner, roles bitmap |
 | `ERC4626 / ERC20` | *(Solady built-in)* | *(Solady slots)* | balances, allowances, totalSupply |
 

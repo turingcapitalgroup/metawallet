@@ -90,7 +90,7 @@ The project uses the following remappings defined in `remappings.txt`:
 | Interfaces | `I` + `PascalCase` | `IHook`, `IHookExecution`, `IVaultModule`, `IMetaWallet` |
 | Events | Past tense / descriptive | `HookInstalled`, `SettlementExecuted`, `Paused` |
 | Errors | `CONTRACTNAME_DESCRIPTION` (string constants) | `HOOKEXECUTION_HOOK_NOT_INSTALLED`, `VAULTMODULE_PAUSED` |
-| Custom types | `PascalCase` with underscore separators | `ERC7540_Request`, `ERC7540_FilledRequest` |
+| Custom types | `PascalCase` with underscore separators | `VaultModuleStorage`, `DepositContext` |
 | Storage location constants | `UPPER_CASE` + `_STORAGE_LOCATION` suffix | `VAULT_MODULE_STORAGE_LOCATION`, `HOOKS_STORAGE_LOCATION` |
 
 ### Functions
@@ -144,7 +144,7 @@ import { HOOKEXECUTION_HOOK_NOT_INSTALLED } from "metawallet/src/errors/Errors.s
 require(_hookAddress != address(0), HOOKEXECUTION_HOOK_NOT_INSTALLED);
 ```
 
-For ERC-7540 base errors (which are part of the standard), use custom `error` declarations with `revert`:
+For ERC-4626 base errors (which are part of the standard), use custom `error` declarations with `revert`:
 
 ```solidity
 error InvalidController();
@@ -232,7 +232,7 @@ Use KAM-style section dividers to organize contract code into logical blocks. Th
 4. STORAGE ACCESS
 5. INTERNAL CHECKS
 6. CONSTRUCTOR (if applicable)
-7. Core logic sections (e.g., HOOK MANAGEMENT, ERC7540 LOGIC, SETTLEMENT LOGIC)
+7. Core logic sections (e.g., HOOK MANAGEMENT, ERC4626 LOGIC, SETTLEMENT LOGIC)
 8. AUTHORIZATION
 9. VALIDATION HELPERS
 10. VIEW FUNCTIONS
@@ -327,7 +327,6 @@ The `& ~bytes32(uint256(0xff))` mask clears the last byte, providing 256 contigu
 |-----------|----------|
 | `metawallet.storage.HookExecution` | HookExecution |
 | `metawallet.storage.VaultModule` | VaultModule |
-| `metawallet.storage.erc7540` | ERC7540 |
 | `minimalaccount.storage` | MinimalSmartAccount |
 | `kam.storage.MultiFacetProxy` | MultiFacetProxy |
 
@@ -499,7 +498,7 @@ All tests use **Foundry** (`forge test`). Test files are in the `test/` director
 
 | Type | Pattern | Example |
 |------|---------|---------|
-| Unit tests | `ContractName.t.sol` | `ERC7540.t.sol` |
+| Unit tests | `ContractName.t.sol` | `VaultModule.t.sol` |
 | Fuzz tests | `ContractNameFuzzTest.t.sol` | `VaultModuleFuzzTest.t.sol` |
 | Base test fixtures | `base/BaseTest.t.sol` | `test/base/BaseTest.t.sol` |
 | Helper contracts | `helpers/Name.sol` | `test/helpers/Tokens.sol` |

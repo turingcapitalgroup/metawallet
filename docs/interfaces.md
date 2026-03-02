@@ -7,8 +7,6 @@ IERC20
   |
 IERC4626
   |
-IERC7540
-  |
 IMetaWallet --- IVaultModule
   |         \
   |          -- IHookExecution
@@ -27,7 +25,7 @@ IHookResult (standalone)
 
 Composite interface for the MetaWallet smart wallet. Aggregates all vault, hook, and smart account functionality into a single interface.
 
-**Inherits:** `IERC7540`, `IVaultModule`, `IMinimalSmartAccount`, `IHookExecution`
+**Inherits:** `IERC4626`, `IVaultModule`, `IMinimalSmartAccount`, `IHookExecution`
 
 This interface declares no additional functions, events, or errors. All members are inherited from its parent interfaces.
 
@@ -210,62 +208,7 @@ Optional interface for hooks that produce output values consumable by subsequent
 
 ---
 
-## 6. IERC7540
-
-**File:** `src/interfaces/IERC7540.sol`
-
-Asynchronous Tokenized Vault interface (ERC-7540). Adds request-based deposit and redeem flows on top of ERC-4626.
-
-**Inherits:** `IERC4626`
-
-### Functions
-
-#### State-Changing
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `requestDeposit` | `requestDeposit(uint256 assets, address controller, address owner) external returns (uint256 requestId)` | Submits a request to deposit `assets`. Returns a unique request identifier. |
-| `requestRedeem` | `requestRedeem(uint256 shares, address controller, address owner) external returns (uint256 requestId)` | Submits a request to redeem `shares`. Returns a unique request identifier. |
-
-**Parameters -- `requestDeposit`**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `assets` | `uint256` | Amount of underlying assets to deposit. |
-| `controller` | `address` | Address that will control (claim) this request. |
-| `owner` | `address` | Address that owns the assets being deposited. |
-
-**Parameters -- `requestRedeem`**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `shares` | `uint256` | Amount of vault shares to redeem. |
-| `controller` | `address` | Address that will control (claim) this request. |
-| `owner` | `address` | Address that owns the shares being redeemed. |
-
-#### View
-
-| Function | Signature | Returns | Description |
-|----------|-----------|---------|-------------|
-| `pendingDepositRequest` | `pendingDepositRequest(address controller) external view returns (uint256)` | `uint256` | Amount of assets pending deposit for a controller. |
-| `claimableDepositRequest` | `claimableDepositRequest(address controller) external view returns (uint256)` | `uint256` | Amount of assets claimable (ready to finalize) for a controller. |
-| `pendingRedeemRequest` | `pendingRedeemRequest(address controller) external view returns (uint256)` | `uint256` | Amount of shares pending redemption for a controller. |
-| `claimableRedeemRequest` | `claimableRedeemRequest(address controller) external view returns (uint256)` | `uint256` | Amount of shares claimable (ready to finalize) for a controller. |
-| `maxDeposit` | `maxDeposit(address controller) external view returns (uint256)` | `uint256` | Maximum assets depositable by a controller. |
-| `maxMint` | `maxMint(address controller) external view returns (uint256)` | `uint256` | Maximum shares mintable by a controller. |
-| `maxRedeem` | `maxRedeem(address controller) external view returns (uint256)` | `uint256` | Maximum shares redeemable by a controller. |
-| `maxWithdraw` | `maxWithdraw(address controller) external view returns (uint256)` | `uint256` | Maximum assets withdrawable by a controller. |
-
-### Events
-
-| Event | Parameters | Description |
-|-------|------------|-------------|
-| `DepositRequest` | `address indexed controller`, `address indexed owner`, `uint256 indexed requestId`, `address sender`, `uint256 assets` | Emitted when a deposit request is submitted. |
-| `RedeemRequest` | `address indexed controller`, `address indexed owner`, `uint256 indexed requestId`, `address sender`, `uint256 shares` | Emitted when a redeem request is submitted. |
-
----
-
-## 7. IERC4626
+## 6. IERC4626
 
 **File:** `src/interfaces/IERC4626.sol`
 
@@ -310,7 +253,7 @@ Standard Tokenized Vault interface (ERC-4626). Provides synchronous deposit, min
 
 ---
 
-## 8. IERC20
+## 7. IERC20
 
 **File:** `src/interfaces/IERC20.sol`
 

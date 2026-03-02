@@ -33,8 +33,8 @@ contract VaultModuleFuzzTest is BaseTest {
     uint256 public constant MIN_DEPOSIT = 1; // 1 wei
 
     uint256 public constant ADMIN_ROLE = 1; // _ROLE_0
-    uint256 public constant WHITELISTED_ROLE = 2; // _ROLE_1
-    uint256 public constant EXECUTOR_ROLE = 2; // _ROLE_1 (same as WHITELISTED_ROLE)
+    uint256 public constant WHITELISTED_ROLE = 4; // _ROLE_2
+    uint256 public constant EXECUTOR_ROLE = 2; // _ROLE_1
     uint256 public constant MANAGER_ROLE = 16; // _ROLE_4
     uint256 public constant EMERGENCY_ADMIN_ROLE = 64; // _ROLE_6
 
@@ -71,6 +71,7 @@ contract VaultModuleFuzzTest is BaseTest {
         vm.startPrank(users.admin);
         MetaWallet(payable(_metaWalletProxy)).addFunctions(_vaultSelectors, address(_vault), false);
         VaultModule(_metaWalletProxy).initializeVault(address(USDC_MAINNET), "Meta USDC", "mUSDC");
+        VaultModule(_metaWalletProxy).setMaxAllowedDelta(10_000);
         vm.stopPrank();
 
         metaWallet = IMetaWallet(_metaWalletProxy);
@@ -99,13 +100,11 @@ contract VaultModuleFuzzTest is BaseTest {
         deal(USDC_MAINNET, users.alice, _depositAmount);
 
         vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
         uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
 
         assertEq(metaWallet.balanceOf(users.alice), _shares, "Shares minted mismatch");
         assertEq(metaWallet.totalAssets(), _depositAmount, "TotalAssets after deposit mismatch");
 
-        metaWallet.requestRedeem(_shares, users.alice, users.alice);
         uint256 _assetsReturned = metaWallet.redeem(_shares, users.alice, users.alice);
         vm.stopPrank();
 
@@ -123,13 +122,11 @@ contract VaultModuleFuzzTest is BaseTest {
         deal(USDC_MAINNET, users.alice, _depositAmount);
 
         vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
         uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
 
         uint256 _redeemShares = (_shares * _redeemPercent) / 100;
         if (_redeemShares == 0) _redeemShares = 1;
 
-        metaWallet.requestRedeem(_redeemShares, users.alice, users.alice);
         uint256 _assetsReturned = metaWallet.redeem(_redeemShares, users.alice, users.alice);
         vm.stopPrank();
 
@@ -151,22 +148,16 @@ contract VaultModuleFuzzTest is BaseTest {
 
         uint256 _initialSharePrice = metaWallet.sharePrice();
 
-        // First deposit
         deal(USDC_MAINNET, users.alice, _deposit1);
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_deposit1, users.alice, users.alice);
+        vm.prank(users.alice);
         metaWallet.deposit(_deposit1, users.alice);
-        vm.stopPrank();
 
         uint256 _sharePriceAfterFirst = metaWallet.sharePrice();
         assertEq(_sharePriceAfterFirst, _initialSharePrice, "Share price changed after first deposit");
 
-        // Second deposit
         deal(USDC_MAINNET, users.bob, _deposit2);
-        vm.startPrank(users.bob);
-        metaWallet.requestDeposit(_deposit2, users.bob, users.bob);
+        vm.prank(users.bob);
         metaWallet.deposit(_deposit2, users.bob);
-        vm.stopPrank();
 
         uint256 _sharePriceAfterSecond = metaWallet.sharePrice();
         assertEq(_sharePriceAfterSecond, _initialSharePrice, "Share price changed after second deposit");
@@ -179,10 +170,8 @@ contract VaultModuleFuzzTest is BaseTest {
 
         deal(USDC_MAINNET, users.alice, _depositAmount);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        vm.prank(users.alice);
         metaWallet.deposit(_depositAmount, users.alice);
-        vm.stopPrank();
 
         uint256 _sharePriceBefore = metaWallet.sharePrice();
 
@@ -204,10 +193,8 @@ contract VaultModuleFuzzTest is BaseTest {
 
         deal(USDC_MAINNET, users.alice, _depositAmount);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        vm.prank(users.alice);
         metaWallet.deposit(_depositAmount, users.alice);
-        vm.stopPrank();
 
         uint256 _sharePriceBefore = metaWallet.sharePrice();
 
@@ -234,15 +221,11 @@ contract VaultModuleFuzzTest is BaseTest {
         deal(USDC_MAINNET, users.alice, _aliceDeposit);
         deal(USDC_MAINNET, users.bob, _bobDeposit);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_aliceDeposit, users.alice, users.alice);
+        vm.prank(users.alice);
         uint256 _aliceShares = metaWallet.deposit(_aliceDeposit, users.alice);
-        vm.stopPrank();
 
-        vm.startPrank(users.bob);
-        metaWallet.requestDeposit(_bobDeposit, users.bob, users.bob);
+        vm.prank(users.bob);
         uint256 _bobShares = metaWallet.deposit(_bobDeposit, users.bob);
-        vm.stopPrank();
 
         uint256 _totalDeposit = _aliceDeposit + _bobDeposit;
         uint256 _totalShares = metaWallet.totalSupply();
@@ -272,15 +255,11 @@ contract VaultModuleFuzzTest is BaseTest {
         deal(USDC_MAINNET, users.alice, _aliceDeposit);
         deal(USDC_MAINNET, users.bob, _bobDeposit);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_aliceDeposit, users.alice, users.alice);
+        vm.prank(users.alice);
         uint256 _aliceShares = metaWallet.deposit(_aliceDeposit, users.alice);
-        vm.stopPrank();
 
-        vm.startPrank(users.bob);
-        metaWallet.requestDeposit(_bobDeposit, users.bob, users.bob);
+        vm.prank(users.bob);
         uint256 _bobShares = metaWallet.deposit(_bobDeposit, users.bob);
-        vm.stopPrank();
 
         uint256 _totalDeposit = _aliceDeposit + _bobDeposit;
         uint256 _yield = (_totalDeposit * _yieldPercent) / 100;
@@ -315,10 +294,8 @@ contract VaultModuleFuzzTest is BaseTest {
 
         deal(USDC_MAINNET, users.alice, _depositAmount);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        vm.prank(users.alice);
         metaWallet.deposit(_depositAmount, users.alice);
-        vm.stopPrank();
 
         uint256 _shares = metaWallet.convertToShares(_testAssets);
         uint256 _assetsBack = metaWallet.convertToAssets(_shares);
@@ -334,10 +311,8 @@ contract VaultModuleFuzzTest is BaseTest {
 
         deal(USDC_MAINNET, users.alice, _depositAmount);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        vm.prank(users.alice);
         metaWallet.deposit(_depositAmount, users.alice);
-        vm.stopPrank();
 
         // Add yield to change share price
         uint256 _yield = (_depositAmount * _yieldPercent) / 100;
@@ -357,35 +332,24 @@ contract VaultModuleFuzzTest is BaseTest {
                     FUZZ TEST: TOTAL IDLE CALCULATIONS
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Fuzz test: totalIdle correctly excludes pending deposits
-    function testFuzz_TotalIdle_ExcludesPendingDeposits(uint256 _deposit1, uint256 _deposit2) public {
+    /// @notice Fuzz test: totalIdle equals vault balance
+    function testFuzz_TotalIdle_EqualsBalance(uint256 _deposit1, uint256 _deposit2) public {
         _deposit1 = bound(_deposit1, MIN_DEPOSIT, MAX_DEPOSIT / 2);
         _deposit2 = bound(_deposit2, MIN_DEPOSIT, MAX_DEPOSIT / 2);
 
-        // First user deposits and claims
         deal(USDC_MAINNET, users.alice, _deposit1);
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_deposit1, users.alice, users.alice);
+        vm.prank(users.alice);
         metaWallet.deposit(_deposit1, users.alice);
-        vm.stopPrank();
 
         uint256 _totalIdleAfterFirst = metaWallet.totalIdle();
         assertEq(_totalIdleAfterFirst, _deposit1, "TotalIdle should equal first deposit");
 
-        // Second user requests but doesn't claim
         deal(USDC_MAINNET, users.bob, _deposit2);
-        vm.prank(users.bob);
-        metaWallet.requestDeposit(_deposit2, users.bob, users.bob);
-
-        uint256 _totalIdleAfterSecondRequest = metaWallet.totalIdle();
-        assertEq(_totalIdleAfterSecondRequest, _deposit1, "TotalIdle should exclude pending deposits");
-
-        // Second user claims
         vm.prank(users.bob);
         metaWallet.deposit(_deposit2, users.bob);
 
-        uint256 _totalIdleAfterSecondClaim = metaWallet.totalIdle();
-        assertEq(_totalIdleAfterSecondClaim, _deposit1 + _deposit2, "TotalIdle should include both deposits");
+        uint256 _totalIdleAfterSecond = metaWallet.totalIdle();
+        assertEq(_totalIdleAfterSecond, _deposit1 + _deposit2, "TotalIdle should include both deposits");
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -399,12 +363,13 @@ contract VaultModuleFuzzTest is BaseTest {
 
         deal(USDC_MAINNET, users.alice, _depositAmount);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        vm.prank(users.alice);
         metaWallet.deposit(_depositAmount, users.alice);
-        vm.stopPrank();
 
         bytes32 _merkleRoot = keccak256(abi.encodePacked("settlement", _newTotalAssets));
+
+        vm.prank(users.admin);
+        VaultModule(address(metaWallet)).setMaxAllowedDelta(0);
 
         vm.prank(users.executor);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
@@ -424,11 +389,8 @@ contract VaultModuleFuzzTest is BaseTest {
 
         deal(USDC_MAINNET, users.alice, _depositAmount);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_depositAmount, users.alice, users.alice);
+        vm.prank(users.alice);
         uint256 _shares = metaWallet.deposit(_depositAmount, users.alice);
-        metaWallet.requestRedeem(_shares, users.alice, users.alice);
-        vm.stopPrank();
 
         // Simulate external investment by reducing vault balance
         uint256 _idleAmount = _depositAmount - _externalAmount;
@@ -438,6 +400,7 @@ contract VaultModuleFuzzTest is BaseTest {
         uint256 _idleShares = metaWallet.convertToShares(_idleAmount);
 
         assertLe(_maxRedeem, _idleShares, "MaxRedeem should be limited by idle shares");
+        assertLe(_maxRedeem, _shares, "MaxRedeem should be limited by user shares");
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -459,15 +422,11 @@ contract VaultModuleFuzzTest is BaseTest {
         deal(USDC_MAINNET, users.alice, _deposit1);
         deal(USDC_MAINNET, users.bob, _deposit2);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_deposit1, users.alice, users.alice);
+        vm.prank(users.alice);
         metaWallet.deposit(_deposit1, users.alice);
-        vm.stopPrank();
 
-        vm.startPrank(users.bob);
-        metaWallet.requestDeposit(_deposit2, users.bob, users.bob);
+        vm.prank(users.bob);
         metaWallet.deposit(_deposit2, users.bob);
-        vm.stopPrank();
 
         // Apply yield/loss
         uint256 _totalDeposit = _deposit1 + _deposit2;
@@ -499,15 +458,11 @@ contract VaultModuleFuzzTest is BaseTest {
         deal(USDC_MAINNET, users.alice, _deposit1);
         deal(USDC_MAINNET, users.bob, _deposit2);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_deposit1, users.alice, users.alice);
+        vm.prank(users.alice);
         uint256 _aliceShares = metaWallet.deposit(_deposit1, users.alice);
-        vm.stopPrank();
 
-        vm.startPrank(users.bob);
-        metaWallet.requestDeposit(_deposit2, users.bob, users.bob);
+        vm.prank(users.bob);
         uint256 _bobShares = metaWallet.deposit(_deposit2, users.bob);
-        vm.stopPrank();
 
         uint256 _totalSupply = metaWallet.totalSupply();
         assertEq(_aliceShares + _bobShares, _totalSupply, "Sum of shares should equal totalSupply");
@@ -523,10 +478,8 @@ contract VaultModuleFuzzTest is BaseTest {
 
         deal(USDC_MAINNET, users.alice, _smallDeposit);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_smallDeposit, users.alice, users.alice);
+        vm.prank(users.alice);
         uint256 _shares = metaWallet.deposit(_smallDeposit, users.alice);
-        vm.stopPrank();
 
         // Should get at least 1 share for any deposit
         assertGe(_shares, _smallDeposit > 0 ? 1 : 0, "Should get shares for non-zero deposit");
@@ -539,10 +492,8 @@ contract VaultModuleFuzzTest is BaseTest {
 
         deal(USDC_MAINNET, users.alice, _largeDeposit);
 
-        vm.startPrank(users.alice);
-        metaWallet.requestDeposit(_largeDeposit, users.alice, users.alice);
+        vm.prank(users.alice);
         uint256 _shares = metaWallet.deposit(_largeDeposit, users.alice);
-        vm.stopPrank();
 
         assertEq(_shares, _largeDeposit, "Large deposit should work correctly");
         assertEq(metaWallet.totalAssets(), _largeDeposit, "TotalAssets should match large deposit");
@@ -562,10 +513,8 @@ contract VaultModuleFuzzTest is BaseTest {
             if (i % 2 == 0) {
                 // Deposit
                 deal(USDC_MAINNET, users.alice, USDC_MAINNET.balanceOf(users.alice) + _amount);
-                vm.startPrank(users.alice);
-                metaWallet.requestDeposit(_amount, users.alice, users.alice);
+                vm.prank(users.alice);
                 metaWallet.deposit(_amount, users.alice);
-                vm.stopPrank();
                 _totalDeposited += _amount;
             } else {
                 // Redeem (if we have shares)
@@ -573,10 +522,8 @@ contract VaultModuleFuzzTest is BaseTest {
                 if (_shares > 0) {
                     uint256 _redeemShares = _shares / 2;
                     if (_redeemShares > 0) {
-                        vm.startPrank(users.alice);
-                        metaWallet.requestRedeem(_redeemShares, users.alice, users.alice);
+                        vm.prank(users.alice);
                         uint256 _assetsOut = metaWallet.redeem(_redeemShares, users.alice, users.alice);
-                        vm.stopPrank();
                         _totalRedeemed += _assetsOut;
                     }
                 }

@@ -18,7 +18,7 @@ flowchart TD
     subgraph Core["Core Contracts"]
         MetaWallet["MetaWallet\n(MinimalSmartAccount + HookExecution + MultiFacetProxy)"]
         HookExecution["HookExecution\n(abstract, hook registry + chain executor)"]
-        VaultModule["VaultModule\n(facet: ERC-7540 + ERC-20 + accounting)"]
+        VaultModule["VaultModule\n(facet: ERC-4626 + ERC-20 + accounting)"]
     end
 
     MetaWallet -->|"inherits"| HookExecution
@@ -55,22 +55,18 @@ flowchart TD
     %% ================================================================
     %% DEPOSIT FLOW
     %% ================================================================
-    Depositor -->|"1. requestDeposit(assets, controller, owner)"| VaultModule
+    Depositor -->|"1. deposit(assets, receiver)"| VaultModule
     VaultModule -->|"2. safeTransferFrom USDC from depositor"| USDC
-    VaultModule -->|"3. fulfillDepositRequest (instant)"| VaultModule
-    Depositor -->|"4. deposit(assets, receiver) -- claim shares"| VaultModule
-    VaultModule -->|"5. mint shares to depositor"| Shares
-    VaultModule -->|"6. virtualTotalAssets += assets"| VaultModule
+    VaultModule -->|"3. mint shares to depositor"| Shares
+    VaultModule -->|"4. virtualTotalAssets += assets"| VaultModule
 
     %% ================================================================
     %% REDEEM FLOW
     %% ================================================================
-    Depositor -->|"1. requestRedeem(shares, controller, owner)"| VaultModule
-    VaultModule -->|"2. transfer shares to vault (escrow)"| Shares
-    Depositor -->|"3. redeem(shares, to, controller) -- claim assets"| VaultModule
-    VaultModule -->|"4. burn escrowed shares"| Shares
-    VaultModule -->|"5. safeTransfer USDC to depositor"| USDC
-    VaultModule -->|"6. virtualTotalAssets -= assets"| VaultModule
+    Depositor -->|"1. redeem(shares, to, owner)"| VaultModule
+    VaultModule -->|"2. burn shares from owner"| Shares
+    VaultModule -->|"3. safeTransfer USDC to depositor"| USDC
+    VaultModule -->|"4. virtualTotalAssets -= assets"| VaultModule
 
     %% ================================================================
     %% INVEST FLOW (Manager -> ERC-4626 Vault via Hook)
@@ -142,7 +138,7 @@ flowchart TD
 | Contract | Responsibility |
 |----------|----------------|
 | **MetaWallet** | Main entry point. Inherits `MinimalSmartAccount` (execution + roles), `HookExecution` (hook registry + chain executor), and `MultiFacetProxy` (selector-based delegatecall routing to facets). |
-| **VaultModule** | Facet installed via `MultiFacetProxy`. Implements ERC-7540 async vault with virtual `totalAssets` tracking, ERC-20 share token, settlement via merkle proofs, and pause functionality. |
+| **VaultModule** | Facet installed via `MultiFacetProxy`. Implements ERC-4626 vault with virtual `totalAssets` tracking, ERC-20 share token, settlement via merkle proofs, and pause functionality. |
 | **HookExecution** | Abstract contract embedded in MetaWallet. Manages a registry of hooks (install/uninstall) and orchestrates multi-hook execution chains with `initializeHookContext` / `finalizeHookContext` lifecycle. |
 
 ### Hook Contracts
