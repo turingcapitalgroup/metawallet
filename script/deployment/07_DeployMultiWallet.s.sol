@@ -198,7 +198,7 @@ contract DeployMultiWalletScript is Script, DeploymentManager {
         MetaWallet metaWallet = MetaWallet(payable(wallet.proxy));
 
         // Grant ADMIN_ROLE to owner
-        metaWallet.grantRoles(config.roles.owner, 1); // ADMIN_ROLE = 1
+        metaWallet.grantRoles(config.roles.admin, 1); // ADMIN_ROLE = 1
         _log("ADMIN_ROLE granted to deployer");
 
         // Setup VaultModule
