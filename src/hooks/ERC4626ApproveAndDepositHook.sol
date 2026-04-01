@@ -150,7 +150,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
             });
 
             if (_depositData.minShares > 0) {
-                _executions[3] = Execution({
+                _executions[4] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(this.validateMinShares.selector, _depositData.minShares)
