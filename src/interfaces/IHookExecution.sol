@@ -36,10 +36,12 @@ interface IHookExecution {
 
     /// @notice Execute a chain of hooks
     /// @dev Each hook builds its own execution logic, and hooks can chain together
+    /// @param expectedNonce Nonce the caller expects; reverts if it does not match current nonce
     /// @param deadline Timestamp after which the transaction reverts
     /// @param hookExecutions Array of hook executions to execute in sequence
     /// @return Final execution results
     function executeWithHookExecution(
+        uint256 expectedNonce,
         uint256 deadline,
         HookExecution[] calldata hookExecutions
     )

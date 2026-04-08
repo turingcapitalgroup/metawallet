@@ -507,7 +507,8 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
 
         assertEq(metaWallet.totalAssets(), _totalAssetsBefore);
         assertEq(metaWallet.sharePrice(), _sharePriceBefore);
@@ -532,7 +533,8 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         _investHooks[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _investHooks);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _investHooks);
 
         uint256 _externalShares = IERC4626(EXTERNAL_VAULT).balanceOf(address(metaWallet));
         uint256 _totalIdleBefore = metaWallet.totalIdle();
@@ -549,7 +551,8 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         _divestHooks[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _divestHooks);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _divestHooks);
 
         uint256 _totalIdleAfter = metaWallet.totalIdle();
         uint256 _externalSharesAfter = IERC4626(EXTERNAL_VAULT).balanceOf(address(metaWallet));
@@ -977,7 +980,7 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         _hooks[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hooks);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hooks);
     }
 
     function _divestFromStrategy() internal {
@@ -995,7 +998,7 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         _hooks[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
         vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hooks);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hooks);
     }
 
     function _redeemUserShares(address _user, uint256 _shares) internal returns (uint256) {

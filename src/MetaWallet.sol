@@ -7,6 +7,7 @@ import { ReentrancyGuard } from "solady/utils/ReentrancyGuard.sol";
 
 // Local Contracts
 import { HookExecution, IHookExecution } from "./HookExecution.sol";
+import { HOOKEXECUTION_INVALID_NONCE } from "./errors/Errors.sol";
 import { MultiFacetProxy } from "kam/base/MultiFacetProxy.sol";
 
 /// @title MetaWallet
@@ -45,6 +46,7 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy, Reen
 
     /// @inheritdoc IHookExecution
     function executeWithHookExecution(
+        uint256 _expectedNonce,
         uint256 _deadline,
         HookExecution[] calldata _hookExecutions
     )
@@ -53,6 +55,7 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy, Reen
         returns (bytes[] memory _results)
     {
         _authorizeExecute(msg.sender);
+        require(_getMinimalAccountStorage().nonce == _expectedNonce, HOOKEXECUTION_INVALID_NONCE);
         return _executeHookExecution(_deadline, _hookExecutions);
     }
 
