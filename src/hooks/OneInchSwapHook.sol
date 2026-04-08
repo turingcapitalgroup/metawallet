@@ -152,11 +152,16 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
         if (_useDynamicAmount) {
             require(_previousHook != address(0), HOOKONEINCH_PREVIOUS_HOOK_NOT_FOUND);
 
-            // [resolveDynamicAmount, approve, swap, resetApproval, (optional) validate]
-            uint256 _execCount = _swapData.minAmountOut > 0 ? 5 : 4;
+            bool _isNativeEth = _swapData.srcToken == NATIVE_ETH;
+
+            // [resolveDynamicAmount, (approve if not ETH), swap, (resetApproval if not ETH), (optional) validate]
+            uint256 _baseExecCount = _isNativeEth ? 2 : 4;
+            uint256 _execCount = _swapData.minAmountOut > 0 ? _baseExecCount + 1 : _baseExecCount;
             _executions = new Execution[](_execCount);
 
-            _executions[0] = Execution({
+            uint256 _idx = 0;
+
+            _executions[_idx++] = Execution({
                 target: address(this),
                 value: 0,
                 callData: abi.encodeWithSelector(
@@ -170,25 +175,29 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
                 )
             });
 
-            _executions[1] = Execution({
-                target: address(this),
-                value: 0,
-                callData: abi.encodeWithSelector(this.approveForSwap.selector, _swapData.router)
-            });
+            if (!_isNativeEth) {
+                _executions[_idx++] = Execution({
+                    target: address(this),
+                    value: 0,
+                    callData: abi.encodeWithSelector(this.approveForSwap.selector, _swapData.router)
+                });
+            }
 
-            _executions[2] = Execution({
+            _executions[_idx++] = Execution({
                 target: address(this),
-                value: 0,
+                value: _isNativeEth ? _swapData.value : 0,
                 callData: abi.encodeWithSelector(this.executeSwap.selector, _swapData.receiver)
             });
 
             // Reset residual approval after swap
-            _executions[3] = Execution({
-                target: address(this), value: 0, callData: abi.encodeWithSelector(this.resetSwapApproval.selector)
-            });
+            if (!_isNativeEth) {
+                _executions[_idx++] = Execution({
+                    target: address(this), value: 0, callData: abi.encodeWithSelector(this.resetSwapApproval.selector)
+                });
+            }
 
             if (_swapData.minAmountOut > 0) {
-                _executions[4] = Execution({
+                _executions[_idx] = Execution({
                     target: address(this),
                     value: 0,
                     callData: abi.encodeWithSelector(this.validateMinOutput.selector, _swapData.minAmountOut)
@@ -333,6 +342,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     /// @param _router The 1inch router address
     function approveForSwap(address _router) external onlyOwner {
         SwapContext memory _ctx = _swapContext;
+        if (_ctx.srcToken == NATIVE_ETH) return;
         (_ctx.srcToken).safeApproveWithRetry(_router, _ctx.amountIn);
     }
 
@@ -348,7 +358,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable {
     /// @notice Execute the swap (for dynamic amount flow)
     /// @dev This function needs the router and swap calldata to be stored first via resolveDynamicAmount
     /// @param _receiver The address to receive the swapped tokens
-    function executeSwap(address _receiver) external onlyOwner {
+    function executeSwap(address _receiver) external payable onlyOwner {
         SwapContext storage _ctx = _swapContext;
 
         // Snapshot destination token balance before swap for delta computation

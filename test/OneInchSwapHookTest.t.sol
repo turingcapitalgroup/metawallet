@@ -222,9 +222,10 @@ contract OneInchSwapHookTest is BaseTest {
         uint256 _usdcBalanceBefore = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _wethBalanceBefore = WETH.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _usdcBalanceAfter = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _wethBalanceAfter = WETH.balanceOf(address(metaWallet));
@@ -270,9 +271,10 @@ contract OneInchSwapHookTest is BaseTest {
         uint256 _ethBalanceBefore = address(metaWallet).balance;
         uint256 _wethBalanceBefore = WETH.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _ethBalanceAfter = address(metaWallet).balance;
         uint256 _wethBalanceAfter = WETH.balanceOf(address(metaWallet));
@@ -314,9 +316,10 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _wethBalance = WETH.balanceOf(address(metaWallet));
         assertGe(_wethBalance, 400e18, "Slippage protection failed");
@@ -370,9 +373,10 @@ contract OneInchSwapHookTest is BaseTest {
 
         uint256 _wethBefore = WETH.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _wethAfter = WETH.balanceOf(address(metaWallet));
 
@@ -422,14 +426,60 @@ contract OneInchSwapHookTest is BaseTest {
 
         uint256 _sharesBefore = VAULT_A.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _sharesAfter = VAULT_A.balanceOf(address(metaWallet));
 
         // Verify shares were received from deposit
         assertGt(_sharesAfter, _sharesBefore, "Vault shares not received after swap->deposit chain");
+    }
+
+    /// @notice Regression test for TOB-KAM-16: dynamic path must not call approveForSwap for native ETH
+    function test_DynamicAmount_NativeETH_SkipsApproval() public {
+        // 1:1 exchange rate, ETH and WETH share 18 decimals
+        oneInchRouter.setExchangeRate(1e18);
+        oneInchRouter.setDecimalAdjustment(1);
+
+        uint256 _ethSwapAmount = 0.01 ether;
+
+        // First hook: deposit USDC to produce a non-zero getOutputAmount() for the swap hook to consume
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: address(VAULT_A), assets: SWAP_AMOUNT, receiver: address(metaWallet), minShares: 0
+            });
+
+        // Second hook: dynamic ETH -> WETH swap; value is static, amountIn is read from depositHook
+        bytes memory _swapCalldata =
+            oneInchRouter.encodeSwapCalldata(NATIVE_ETH, WETH, _ethSwapAmount, 0, address(metaWallet));
+
+        OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
+            router: address(oneInchRouter),
+            srcToken: NATIVE_ETH,
+            dstToken: WETH,
+            amountIn: swapHook.USE_PREVIOUS_HOOK_OUTPUT(),
+            minAmountOut: 0,
+            receiver: address(metaWallet),
+            value: _ethSwapAmount,
+            swapCalldata: _swapCalldata
+        });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](2);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+        _hookExecutions[1] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
+
+        uint256 _ethBefore = address(metaWallet).balance;
+        uint256 _wethBefore = WETH.balanceOf(address(metaWallet));
+
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
+
+        assertEq(_ethBefore - address(metaWallet).balance, _ethSwapAmount, "ETH not spent");
+        assertGt(WETH.balanceOf(address(metaWallet)), _wethBefore, "WETH not received");
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -453,10 +503,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_PREVIOUS_HOOK_NOT_FOUND));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     function testRevert_SlippageProtection_InsufficientOutput() public {
@@ -485,10 +536,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_INSUFFICIENT_OUTPUT));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     function testRevert_InvalidRouter() public {
@@ -509,10 +561,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_ROUTER));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     function testRevert_InvalidSrcToken() public {
@@ -533,10 +586,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_HOOK_DATA));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     function testRevert_InvalidDstToken() public {
@@ -557,10 +611,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_HOOK_DATA));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     function testRevert_InvalidReceiver() public {
@@ -581,10 +636,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_HOOK_DATA));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     function testRevert_EmptySwapCalldata() public {
@@ -602,10 +658,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_HOOK_DATA));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     function testRevert_ZeroAmountStatic() public {
@@ -631,10 +688,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_HOOK_DATA));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     function testRevert_UnauthorizedExecution() public {
@@ -656,10 +714,11 @@ contract OneInchSwapHookTest is BaseTest {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
         // Alice doesn't have EXECUTOR_ROLE
-        vm.prank(users.alice);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.alice);
         vm.expectRevert("Unauthorized()");
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -692,9 +751,10 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         // After execution, context should be cleared
         OneInchSwapHook.SwapContext memory _ctx = swapHook.getSwapContext();
@@ -752,9 +812,10 @@ contract OneInchSwapHookTest is BaseTest {
         uint256 _usdcBefore = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _wethBefore = WETH.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _usdcAfter = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _wethAfter = WETH.balanceOf(address(metaWallet));
@@ -800,10 +861,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert();
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     /// @notice Tests swap static amount produces correct delta-based output
@@ -829,9 +891,10 @@ contract OneInchSwapHookTest is BaseTest {
 
         uint256 _wethBefore = IERC20(WETH).balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _wethAfter = IERC20(WETH).balanceOf(address(metaWallet));
         assertGt(_wethAfter, _wethBefore, "Should have received WETH from swap");
@@ -866,10 +929,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert();
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     /// @notice Tests swap slippage reverts with very low exchange rate
@@ -898,10 +962,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert();
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     /// @notice Tests context cleanup after both deposit and swap executions
@@ -944,10 +1009,11 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
 
-        vm.prank(users.owner);
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOKONEINCH_ROUTER_NOT_ALLOWED));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     /// @notice Whitelist a router, verify it's allowed, remove it, verify it's not allowed
@@ -1035,9 +1101,10 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_data) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     /// @notice Helper to execute a swap via hook execution
@@ -1059,8 +1126,9 @@ contract OneInchSwapHookTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_data) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 }

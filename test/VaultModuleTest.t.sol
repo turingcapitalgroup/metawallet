@@ -506,9 +506,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         assertEq(metaWallet.totalAssets(), _totalAssetsBefore);
         assertEq(metaWallet.sharePrice(), _sharePriceBefore);
@@ -532,9 +533,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _investHooks = new IHookExecution.HookExecution[](1);
         _investHooks[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _investHooks);
+        vm.stopPrank();
 
         uint256 _externalShares = IERC4626(EXTERNAL_VAULT).balanceOf(address(metaWallet));
         uint256 _totalIdleBefore = metaWallet.totalIdle();
@@ -550,9 +552,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _divestHooks = new IHookExecution.HookExecution[](1);
         _divestHooks[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet)))
             .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _divestHooks);
+        vm.stopPrank();
 
         uint256 _totalIdleAfter = metaWallet.totalIdle();
         uint256 _externalSharesAfter = IERC4626(EXTERNAL_VAULT).balanceOf(address(metaWallet));
@@ -979,8 +982,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _hooks = new IHookExecution.HookExecution[](1);
         _hooks[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet))).executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hooks);
+        vm.stopPrank();
     }
 
     function _divestFromStrategy() internal {
@@ -997,8 +1001,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _hooks = new IHookExecution.HookExecution[](1);
         _hooks[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
-        vm.prank(users.owner);
+        vm.startPrank(users.owner);
         MetaWallet(payable(address(metaWallet))).executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hooks);
+        vm.stopPrank();
     }
 
     function _redeemUserShares(address _user, uint256 _shares) internal returns (uint256) {
