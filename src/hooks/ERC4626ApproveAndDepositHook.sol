@@ -17,7 +17,9 @@ import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount
 import {
     HOOK4626DEPOSIT_INSUFFICIENT_SHARES,
     HOOK4626DEPOSIT_INVALID_HOOK_DATA,
-    HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND
+    HOOK4626DEPOSIT_INVALID_VAULT,
+    HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND,
+    HOOK4626DEPOSIT_VAULT_NOT_ALLOWED
 } from "metawallet/src/errors/Errors.sol";
 
 /// @title ERC4626ApproveAndDepositHook
@@ -30,6 +32,15 @@ import {
 ///      Supports dynamic amounts by reading from previous hook's output
 contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     using SafeTransferLib for address;
+
+    /* ///////////////////////////////////////////////////////////////
+                              EVENTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Emitted when a vault's whitelist status changes
+    /// @param vault The vault address
+    /// @param allowed Whether the vault is now allowed
+    event VaultAllowedUpdated(address indexed vault, bool allowed);
 
     /* ///////////////////////////////////////////////////////////////
                               CONSTANTS
@@ -68,6 +79,9 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @notice Stores deposit context data for the current execution
     /// @dev This allows subsequent hooks to access deposit details
     DepositContext private _depositContext;
+
+    /// @notice Whitelist of allowed ERC4626 vault addresses
+    mapping(address => bool) private _allowedVaults;
 
     /* ///////////////////////////////////////////////////////////////
                          HOOK DATA STRUCTURE
@@ -110,6 +124,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
 
         require(_depositData.vault != address(0), HOOK4626DEPOSIT_INVALID_HOOK_DATA);
         require(_depositData.receiver != address(0), HOOK4626DEPOSIT_INVALID_HOOK_DATA);
+        require(_allowedVaults[_depositData.vault], HOOK4626DEPOSIT_VAULT_NOT_ALLOWED);
 
         address _asset = IERC4626(_depositData.vault).asset();
 
@@ -245,6 +260,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _vault The vault address (stored for later use)
     /// @param _asset The asset address (stored for later use)
     function resolveDynamicAmount(address _previousHook, address _vault, address _asset) external onlyOwner {
+        require(_allowedVaults[_vault], HOOK4626DEPOSIT_VAULT_NOT_ALLOWED);
         uint256 _amount = IHookResult(_previousHook).getOutputAmount();
         require(_amount > 0, HOOK4626DEPOSIT_INVALID_HOOK_DATA);
 
@@ -261,6 +277,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @notice Approve the vault to spend assets (for dynamic amount flow)
     /// @param _vault The vault address
     function approveForDeposit(address _vault) external onlyOwner {
+        require(_allowedVaults[_vault], HOOK4626DEPOSIT_VAULT_NOT_ALLOWED);
         DepositContext memory _ctx = _depositContext;
         _ctx.asset.safeApproveWithRetry(_vault, _ctx.assetsDeposited);
     }
@@ -270,6 +287,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _vault The vault address (spender)
     /// @param _amount The amount to approve
     function approveForDepositStatic(address _asset, address _vault, uint256 _amount) external onlyOwner {
+        require(_allowedVaults[_vault], HOOK4626DEPOSIT_VAULT_NOT_ALLOWED);
         _asset.safeApproveWithRetry(_vault, _amount);
     }
 
@@ -286,6 +304,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _receiver The address to receive the shares
     function executeDeposit(address _receiver) external onlyOwner {
         DepositContext storage _ctx = _depositContext;
+        require(_allowedVaults[_ctx.vault], HOOK4626DEPOSIT_VAULT_NOT_ALLOWED);
         uint256 _sharesBefore = IERC20(_ctx.vault).balanceOf(_receiver);
         IERC4626(_ctx.vault).deposit(_ctx.assetsDeposited, _receiver);
         uint256 _shares = IERC20(_ctx.vault).balanceOf(_receiver) - _sharesBefore;
@@ -299,6 +318,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _assets The amount of assets to deposit
     /// @param _receiver The address to receive the shares
     function executeDepositStatic(address _vault, uint256 _assets, address _receiver) external onlyOwner {
+        require(_allowedVaults[_vault], HOOK4626DEPOSIT_VAULT_NOT_ALLOWED);
         uint256 _sharesBefore = IERC20(_vault).balanceOf(_receiver);
         IERC4626(_vault).deposit(_assets, _receiver);
         uint256 _shares = IERC20(_vault).balanceOf(_receiver) - _sharesBefore;
@@ -346,6 +366,26 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @param _minShares The minimum expected shares
     function validateMinShares(uint256 _minShares) external view onlyOwner {
         require(_depositContext.sharesReceived >= _minShares, HOOK4626DEPOSIT_INSUFFICIENT_SHARES);
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         VAULT MANAGEMENT
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Set whether a vault address is allowed for deposits
+    /// @param _vault The vault address
+    /// @param _allowed Whether the vault is allowed
+    function setVaultAllowed(address _vault, bool _allowed) external onlyOwner {
+        require(_vault != address(0), HOOK4626DEPOSIT_INVALID_VAULT);
+        _allowedVaults[_vault] = _allowed;
+        emit VaultAllowedUpdated(_vault, _allowed);
+    }
+
+    /// @notice Check if a vault address is allowed
+    /// @param _vault The vault address to check
+    /// @return _allowed Whether the vault is allowed
+    function isVaultAllowed(address _vault) external view returns (bool _allowed) {
+        return _allowedVaults[_vault];
     }
 
     /* ///////////////////////////////////////////////////////////////

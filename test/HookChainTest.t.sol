@@ -104,6 +104,12 @@ contract HookChainTest is BaseTest {
         MetaWallet(payable(address(metaWallet))).installHook(REDEEM_HOOK_ID, address(redeemHook));
         vm.stopPrank();
 
+        // Whitelist test vaults in the deposit hook
+        vm.startPrank(address(metaWallet));
+        depositHook.setVaultAllowed(VAULT_A, true);
+        depositHook.setVaultAllowed(VAULT_B, true);
+        vm.stopPrank();
+
         // Whitelist hook contracts and vaults in registry
         registry.whitelistTarget(address(depositHook));
         registry.whitelistTarget(address(redeemHook));
@@ -609,6 +615,75 @@ contract HookChainTest is BaseTest {
         // Verify the vault token (share token) approval from metaWallet to redeemHook is reset to 0
         uint256 _allowance = IERC20(VAULT_A).allowance(address(metaWallet), address(redeemHook));
         assertEq(_allowance, 0, "Vault token approval from metaWallet to redeemHook should be reset to 0");
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         VAULT WHITELIST TESTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Hook data targeting a non-whitelisted vault must revert during buildExecutions
+    function testRevert_BuildExecutions_VaultNotAllowed() public {
+        address _evilVault = makeAddr("EvilVault");
+
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: _evilVault, assets: DEPOSIT_AMOUNT, receiver: address(metaWallet), minShares: 0
+            });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+
+        vm.startPrank(users.owner);
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
+    }
+
+    /// @notice Direct call to approveForDepositStatic with a non-whitelisted vault must revert
+    function testRevert_ApproveForDepositStatic_VaultNotAllowed() public {
+        address _evilVault = makeAddr("EvilVault");
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
+        depositHook.approveForDepositStatic(USDC_MAINNET, _evilVault, 1_000);
+    }
+
+    /// @notice Direct call to executeDepositStatic with a non-whitelisted vault must revert
+    function testRevert_ExecuteDepositStatic_VaultNotAllowed() public {
+        address _evilVault = makeAddr("EvilVault");
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
+        depositHook.executeDepositStatic(_evilVault, 1_000, address(metaWallet));
+    }
+
+    /// @notice Non-owner calling setVaultAllowed must revert with Ownable.Unauthorized
+    function testRevert_SetVaultAllowed_Unauthorized() public {
+        address _newVault = makeAddr("NewVault");
+        vm.prank(users.alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        depositHook.setVaultAllowed(_newVault, true);
+    }
+
+    /// @notice setVaultAllowed rejects the zero address
+    function testRevert_SetVaultAllowed_ZeroAddress() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_INVALID_VAULT));
+        depositHook.setVaultAllowed(address(0), true);
+    }
+
+    /// @notice setVaultAllowed toggles whitelist status and is reflected in isVaultAllowed
+    function test_SetVaultAllowed_TogglesWhitelist() public {
+        address _newVault = makeAddr("NewVault");
+
+        assertFalse(depositHook.isVaultAllowed(_newVault), "Vault should not be allowed initially");
+
+        vm.prank(address(metaWallet));
+        depositHook.setVaultAllowed(_newVault, true);
+        assertTrue(depositHook.isVaultAllowed(_newVault), "Vault should be allowed after whitelisting");
+
+        vm.prank(address(metaWallet));
+        depositHook.setVaultAllowed(_newVault, false);
+        assertFalse(depositHook.isVaultAllowed(_newVault), "Vault should not be allowed after removal");
     }
 
     /* ///////////////////////////////////////////////////////////////

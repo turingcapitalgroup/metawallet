@@ -103,6 +103,11 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         MetaWallet(payable(address(metaWallet))).installHook(REDEEM_HOOK_ID, address(redeemHook));
         vm.stopPrank();
 
+        vm.startPrank(address(metaWallet));
+        depositHook.setVaultAllowed(EXTERNAL_VAULT_A, true);
+        depositHook.setVaultAllowed(EXTERNAL_VAULT_B, true);
+        vm.stopPrank();
+
         registry.whitelistTarget(address(depositHook));
         registry.whitelistTarget(address(redeemHook));
         registry.whitelistTarget(address(USDC_MAINNET));
