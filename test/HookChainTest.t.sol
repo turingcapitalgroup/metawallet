@@ -633,10 +633,10 @@ contract HookChainTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
+        uint256 _nonce = metaWallet.nonce();
         vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
-        MetaWallet(payable(address(metaWallet)))
-            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
         vm.stopPrank();
     }
 
