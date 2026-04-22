@@ -148,8 +148,15 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable, ReentrancyGuard {
     ///      generic `execute` dispatch and drain the hook's balance even with the
     ///      router allow-list, because 1inch honors the attacker-chosen dstReceiver.
     modifier onlyInsideChain() {
-        require(_executionContext, HOOKONEINCH_INACTIVE_CONTEXT);
+        _onlyInsideChain();
         _;
+    }
+
+    /// @dev Wrapped modifier body — see forge lint `unwrapped-modifier-logic`.
+    ///      `view` because the modifier is also applied to view functions (e.g.
+    ///      validateMinOutput); Solidity rejects a non-view call from a view fn.
+    function _onlyInsideChain() internal view {
+        require(_executionContext, HOOKONEINCH_INACTIVE_CONTEXT);
     }
 
     /* ///////////////////////////////////////////////////////////////
