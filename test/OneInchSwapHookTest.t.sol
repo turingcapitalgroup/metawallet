@@ -21,6 +21,7 @@ import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
 import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
 import { IMetaWallet } from "metawallet/src/interfaces/IMetaWallet.sol";
+import { I1InchAggregationRouterV6 } from "metawallet/src/interfaces/I1InchAggregationRouterV6.sol";
 
 // Mock Contracts
 import { MockOneInchRouter } from "metawallet/test/helpers/mocks/MockOneInchRouter.sol";
@@ -31,32 +32,6 @@ import "metawallet/src/errors/Errors.sol" as Errors;
 
 // Access Control
 import { Ownable } from "solady/auth/Ownable.sol";
-
-// 1inch interfaces
-interface IAggregationExecutor {
-    function execute(address msgSender) external payable returns (uint256);
-}
-
-interface I1InchAggregationRouterV6 {
-    struct SwapDescription {
-        IERC20 srcToken;
-        IERC20 dstToken;
-        address payable srcReceiver;
-        address payable dstReceiver;
-        uint256 amount;
-        uint256 minReturnAmount;
-        uint256 flags;
-    }
-
-    function swap(
-        IAggregationExecutor executor,
-        SwapDescription calldata desc,
-        bytes calldata data
-    )
-        external
-        payable
-        returns (uint256 returnAmount, uint256 spentAmount);
-}
 
 contract OneInchSwapHookTest is BaseTest {
     using SafeTransferLib for address;
@@ -196,24 +171,19 @@ contract OneInchSwapHookTest is BaseTest {
     ///////////////////////////////////////////////////////////////*/
 
     function test_SingleSwapHook_StaticAmount() public {
-        // Build the 1inch swap calldata using the mock router's expected format
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(
-            USDC_MAINNET,
-            WETH,
-            SWAP_AMOUNT,
-            0, // minReturn
-            address(metaWallet)
-        );
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0, // No ETH value for token->token swap
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -244,25 +214,19 @@ contract OneInchSwapHookTest is BaseTest {
         oneInchRouter.setExchangeRate(1e18);
         oneInchRouter.setDecimalAdjustment(1); // Same decimals (18 -> 18)
 
-        // Build the swap calldata using the mock router
-        // The mock router will handle the swap and send WETH to the receiver
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(
-            NATIVE_ETH, // srcToken is native ETH
-            WETH,
-            _swapAmount,
-            0, // minReturn
-            address(metaWallet)
-        );
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: NATIVE_ETH,
-            dstToken: WETH,
             amountIn: _swapAmount,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: _swapAmount, // ETH value for native swap
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: NATIVE_ETH, // srcToken is native ETH
+            dstToken: WETH,
+            srcReceiver: address(0),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -294,23 +258,19 @@ contract OneInchSwapHookTest is BaseTest {
         // Expected output: 1000 * 0.5 * 1e12 = 500e18 / 1e18 = 500e12 wei WETH
         // With decimal adjustment: 1000e6 * 0.5e18 * 1e12 / 1e18 = 500e18
 
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(
-            USDC_MAINNET,
-            WETH,
-            SWAP_AMOUNT,
-            400e18, // minReturn - expect at least 400 WETH (in wei)
-            address(metaWallet)
-        );
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
+            amountIn: SWAP_AMOUNT,
+            minAmountOut: 400e18, // Slippage protection (hook-level)
+            value: 0,
+            data: "",
+            executor: address(0),
             srcToken: USDC_MAINNET,
             dstToken: WETH,
-            amountIn: SWAP_AMOUNT,
-            minAmountOut: 400e18, // Slippage protection
+            srcReceiver: address(oneInchRouter),
             receiver: address(metaWallet),
-            value: 0,
-            swapCalldata: _swapCalldata
+            routerMinReturn: 400e18, // Router-level minReturn mirrors hook-level
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -346,24 +306,19 @@ contract OneInchSwapHookTest is BaseTest {
             minAssets: 0
         });
 
-        // Now swap the USDC output from redeem
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(
-            USDC_MAINNET,
-            WETH,
-            0, // Amount will be determined dynamically
-            0, // minReturn
-            address(metaWallet)
-        );
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: swapHook.USE_PREVIOUS_HOOK_OUTPUT(), // Dynamic!
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](3);
@@ -392,23 +347,19 @@ contract OneInchSwapHookTest is BaseTest {
         oneInchRouter.setExchangeRate(1e18);
         oneInchRouter.setDecimalAdjustment(1); // Same decimals
 
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(
-            USDC_MAINNET,
-            USDC_MAINNET, // Swap to same token for test simplicity
-            SWAP_AMOUNT,
-            0,
-            address(depositHook) // Send output to deposit hook
-        );
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: USDC_MAINNET,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
-            receiver: address(depositHook),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: USDC_MAINNET, // Swap to same token for test simplicity
+            srcReceiver: address(oneInchRouter),
+            receiver: address(depositHook), // Send output to deposit hook
+            routerMinReturn: 0,
+            flags: 0
         });
 
         // Deposit the swap output into vault
@@ -452,18 +403,19 @@ contract OneInchSwapHookTest is BaseTest {
             });
 
         // Second hook: dynamic ETH -> WETH swap; value is static, amountIn is read from depositHook
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(NATIVE_ETH, WETH, _ethSwapAmount, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: NATIVE_ETH,
-            dstToken: WETH,
             amountIn: swapHook.USE_PREVIOUS_HOOK_OUTPUT(),
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: _ethSwapAmount,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: NATIVE_ETH,
+            dstToken: WETH,
+            srcReceiver: address(0),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](2);
@@ -487,17 +439,19 @@ contract OneInchSwapHookTest is BaseTest {
     ///////////////////////////////////////////////////////////////*/
 
     function testRevert_DynamicAmount_NoPreviousHook() public {
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, 0, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: swapHook.USE_PREVIOUS_HOOK_OUTPUT(), // Dynamic but no previous hook!
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -514,23 +468,19 @@ contract OneInchSwapHookTest is BaseTest {
         oneInchRouter.setExchangeRate(0.1e18); // Very low rate
         oneInchRouter.setDecimalAdjustment(1e12);
 
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(
-            USDC_MAINNET,
-            WETH,
-            SWAP_AMOUNT,
-            0, // No minimum in router call - validation happens in hook
-            address(metaWallet)
-        );
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 1000e18, // Expect way more than we'll get
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0, // No minimum in router call - validation happens in hook
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -544,18 +494,19 @@ contract OneInchSwapHookTest is BaseTest {
     }
 
     function testRevert_InvalidRouter() public {
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, SWAP_AMOUNT, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(0), // Invalid!
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -569,18 +520,19 @@ contract OneInchSwapHookTest is BaseTest {
     }
 
     function testRevert_InvalidSrcToken() public {
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, SWAP_AMOUNT, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: address(0), // Invalid!
-            dstToken: WETH,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: address(0), // Invalid!
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -594,18 +546,19 @@ contract OneInchSwapHookTest is BaseTest {
     }
 
     function testRevert_InvalidDstToken() public {
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, SWAP_AMOUNT, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: address(0), // Invalid!
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: address(0), // Invalid!
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -619,40 +572,19 @@ contract OneInchSwapHookTest is BaseTest {
     }
 
     function testRevert_InvalidReceiver() public {
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, SWAP_AMOUNT, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
+            value: 0,
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
             receiver: address(0), // Invalid!
-            value: 0,
-            swapCalldata: _swapCalldata
-        });
-
-        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
-        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
-
-        uint256 _nonce = metaWallet.nonce();
-        vm.startPrank(users.owner);
-        vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_HOOK_DATA));
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
-        vm.stopPrank();
-    }
-
-    function testRevert_EmptySwapCalldata() public {
-        OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
-            router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
-            amountIn: SWAP_AMOUNT,
-            minAmountOut: 0,
-            receiver: address(metaWallet),
-            value: 0,
-            swapCalldata: "" // Empty!
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -666,23 +598,19 @@ contract OneInchSwapHookTest is BaseTest {
     }
 
     function testRevert_ZeroAmountStatic() public {
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(
-            USDC_MAINNET,
-            WETH,
-            0, // Zero amount
-            0,
-            address(metaWallet)
-        );
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: 0, // Zero - invalid for static
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -696,18 +624,19 @@ contract OneInchSwapHookTest is BaseTest {
     }
 
     function testRevert_UnauthorizedExecution() public {
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, SWAP_AMOUNT, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -734,18 +663,19 @@ contract OneInchSwapHookTest is BaseTest {
     ///////////////////////////////////////////////////////////////*/
 
     function test_SwapContextStoredCorrectly() public {
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, SWAP_AMOUNT, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -785,23 +715,19 @@ contract OneInchSwapHookTest is BaseTest {
             minAssets: 0
         });
 
-        bytes memory _swapCalldata = oneInchRouter.encodeSwapCalldata(
-            USDC_MAINNET,
-            WETH,
-            0, // Dynamic
-            0,
-            address(metaWallet)
-        );
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: swapHook.USE_PREVIOUS_HOOK_OUTPUT(),
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](3);
@@ -844,18 +770,19 @@ contract OneInchSwapHookTest is BaseTest {
         uint256 _swapAmount = 1000 * _1_USDC;
         uint256 _minOutput = 100 ether;
 
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, _swapAmount, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: _swapAmount,
             minAmountOut: _minOutput,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -872,18 +799,19 @@ contract OneInchSwapHookTest is BaseTest {
     function test_SwapStatic_DeltaBasedOutput() public {
         deal(USDC_MAINNET, address(metaWallet), 100_000 * _1_USDC);
 
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, 1000 * _1_USDC, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: 1000 * _1_USDC,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -912,18 +840,19 @@ contract OneInchSwapHookTest is BaseTest {
         uint256 _swapAmount = 1000 * _1_USDC;
         uint256 _minOutput = 100 ether;
 
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, _swapAmount, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: _swapAmount,
             minAmountOut: _minOutput,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -945,18 +874,19 @@ contract OneInchSwapHookTest is BaseTest {
         uint256 _swapAmount = 1000 * _1_USDC;
         uint256 _minOutput = 900 ether;
 
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, _swapAmount, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: _swapAmount,
             minAmountOut: _minOutput,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -992,18 +922,19 @@ contract OneInchSwapHookTest is BaseTest {
     function testRevert_SwapWithUnwhitelistedRouter() public {
         address _randomRouter = address(0xDEAD);
 
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(USDC_MAINNET, WETH, SWAP_AMOUNT, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
             router: _randomRouter,
-            srcToken: USDC_MAINNET,
-            dstToken: WETH,
             amountIn: SWAP_AMOUNT,
             minAmountOut: 0,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: _randomRouter,
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
@@ -1054,41 +985,351 @@ contract OneInchSwapHookTest is BaseTest {
         swapHook.setRouterAllowed(address(0), true);
     }
 
+    /// @notice Direct call to approveForSwap with a non-whitelisted router must revert.
+    /// @dev Must activate the execution context first (post-H1I8 gate) so that the
+    ///      router allow-list check is the assertion under test, not the gate.
+    function testRevert_ApproveForSwap_RouterNotAllowed() public {
+        address _evilRouter = makeAddr("EvilRouter");
+        vm.startPrank(address(metaWallet));
+        swapHook.initializeHookContext();
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_ROUTER_NOT_ALLOWED));
+        swapHook.approveForSwap(_evilRouter);
+        vm.stopPrank();
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         ROUTER REVERT FORWARDING
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice A router revert inside the dynamic executeSwap path must bubble up the
+    ///         router's raw revert data instead of a flattened generic error.
+    function testRevert_ExecuteSwap_Dynamic_BubblesRouterRevertData() public {
+        // Deposit USDC to get shares, then redeem shares to send USDC to swapHook
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: address(VAULT_A), assets: SWAP_AMOUNT, receiver: address(metaWallet), minShares: 0
+            });
+
+        ERC4626RedeemHook.RedeemData memory _redeemData = ERC4626RedeemHook.RedeemData({
+            vault: address(VAULT_A),
+            shares: redeemHook.USE_PREVIOUS_HOOK_OUTPUT(),
+            receiver: address(swapHook),
+            owner: address(metaWallet),
+            minAssets: 0
+        });
+
+        // Force the router's swap() to revert with its own
+        // `require(returnAmount >= minReturnAmount, "Insufficient return amount")`
+        // by setting an impossible routerMinReturn. The hook builds the V6 calldata
+        // internally — the caller no longer controls raw bytes, so the only way to
+        // reach the router's revert path is via the typed SwapDescription fields.
+        OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
+            router: address(oneInchRouter),
+            amountIn: swapHook.USE_PREVIOUS_HOOK_OUTPUT(),
+            minAmountOut: 0,
+            value: 0,
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: type(uint256).max, // impossible — forces router-level revert
+            flags: 0
+        });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](3);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+        _hookExecutions[1] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
+        _hookExecutions[2] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
+
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
+        vm.expectRevert(bytes("Insufficient return amount"));
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         FLAG ALLOW-LIST TESTS (H1I7)
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Static path with non-zero flags must revert with H1I7.
+    /// @dev Flag bit 0 is _PARTIAL_FILL in V6. The hook enforces `flags == 0` as a
+    ///      positive allow-list so future/unknown flag bits cannot sneak through the
+    ///      typed path. Coverage for the buildExecutions shared-invariants check.
+    function testRevert_Static_InvalidFlags() public {
+        OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
+            router: address(oneInchRouter),
+            amountIn: SWAP_AMOUNT,
+            minAmountOut: 0,
+            value: 0,
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 1 // _PARTIAL_FILL — forbidden
+        });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
+
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_FLAGS));
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
+    }
+
+    /// @notice Dynamic path with non-zero flags must revert with H1I7 at buildExecutions time.
+    /// @dev Uses flag bit 1 (_REQUIRES_EXTRA_ETH) to vary from the static test and
+    ///      confirm the allow-list rejects arbitrary bits, not just bit 0.
+    function testRevert_Dynamic_InvalidFlags() public {
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: address(VAULT_A), assets: SWAP_AMOUNT, receiver: address(metaWallet), minShares: 0
+            });
+
+        OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
+            router: address(oneInchRouter),
+            amountIn: swapHook.USE_PREVIOUS_HOOK_OUTPUT(),
+            minAmountOut: 0,
+            value: 0,
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 2 // _REQUIRES_EXTRA_ETH — forbidden
+        });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](2);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+        _hookExecutions[1] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
+
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_FLAGS));
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         DIRECT-CALL GUARDS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice resolveDynamicAmount must enforce onlyOwner (owner = metaWallet).
+    function testRevert_ResolveDynamicAmount_Unauthorized() public {
+        OneInchSwapHook.SwapData memory _swapData = _defaultSwapData();
+        vm.prank(users.alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        swapHook.resolveDynamicAmount(address(swapHook), _swapData);
+    }
+
+    /// @notice resolveDynamicAmount re-checks the router allow-list (defence-in-depth).
+    /// @dev buildExecutions already validates this, but resolveDynamicAmount is callable
+    ///      on its own and must not trust its inputs. A bad router bypasses the first
+    ///      gate if someone reuses the selector in a hand-crafted Execution[] chain.
+    function testRevert_ResolveDynamicAmount_RouterNotAllowed() public {
+        OneInchSwapHook.SwapData memory _swapData = _defaultSwapData();
+        _swapData.router = address(0xDEAD); // not whitelisted
+        vm.startPrank(address(metaWallet));
+        swapHook.initializeHookContext();
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_ROUTER_NOT_ALLOWED));
+        swapHook.resolveDynamicAmount(address(swapHook), _swapData);
+        vm.stopPrank();
+    }
+
+    /// @notice resolveDynamicAmount re-checks flags == 0 (defence-in-depth).
+    function testRevert_ResolveDynamicAmount_InvalidFlags() public {
+        OneInchSwapHook.SwapData memory _swapData = _defaultSwapData();
+        _swapData.flags = 1;
+        vm.startPrank(address(metaWallet));
+        swapHook.initializeHookContext();
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_FLAGS));
+        swapHook.resolveDynamicAmount(address(swapHook), _swapData);
+        vm.stopPrank();
+    }
+
+    /// @notice resolveDynamicAmount reverts H1I1 when the previous hook's
+    ///         getOutputAmount() returns 0.
+    /// @dev swapHook itself is a valid IHookResult and, with no prior swap,
+    ///      its _swapContext.amountOut is 0 — a zero-cost stand-in previousHook
+    ///      that trips the `_amount > 0` guard without needing a bespoke mock.
+    function testRevert_ResolveDynamicAmount_ZeroOutput() public {
+        OneInchSwapHook.SwapData memory _swapData = _defaultSwapData();
+        vm.startPrank(address(metaWallet));
+        swapHook.initializeHookContext();
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INVALID_HOOK_DATA));
+        swapHook.resolveDynamicAmount(address(swapHook), _swapData);
+        vm.stopPrank();
+    }
+
+    /// @notice executeSwap must enforce onlyOwner.
+    function testRevert_ExecuteSwap_Unauthorized() public {
+        vm.prank(users.alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        swapHook.executeSwap(address(metaWallet));
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         EXECUTION-CONTEXT GATE (H1I8)
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice resolveDynamicAmount must revert H1I8 when called outside an active chain.
+    /// @dev Without this gate, EXECUTOR_ROLE could plant _swapContext/_tempSwapCalldata
+    ///      with attacker-chosen dstReceiver and drain via a legitimate router.
+    function testRevert_ResolveDynamicAmount_InactiveContext() public {
+        OneInchSwapHook.SwapData memory _swapData = _defaultSwapData();
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INACTIVE_CONTEXT));
+        swapHook.resolveDynamicAmount(address(swapHook), _swapData);
+    }
+
+    /// @notice snapshotDstBalance must revert H1I8 when called outside an active chain.
+    function testRevert_SnapshotDstBalance_InactiveContext() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INACTIVE_CONTEXT));
+        swapHook.snapshotDstBalance(address(USDC_MAINNET), address(metaWallet));
+    }
+
+    /// @notice approveForSwap must revert H1I8 when called outside an active chain.
+    /// @dev Pairs with the router allow-list re-check — gate fires first because
+    ///      onlyOwner and onlyInsideChain precede the router check.
+    function testRevert_ApproveForSwap_InactiveContext() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INACTIVE_CONTEXT));
+        swapHook.approveForSwap(address(oneInchRouter));
+    }
+
+    /// @notice resetSwapApproval must revert H1I8 when called outside an active chain.
+    function testRevert_ResetSwapApproval_InactiveContext() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INACTIVE_CONTEXT));
+        swapHook.resetSwapApproval();
+    }
+
+    /// @notice executeSwap must revert H1I8 when called outside an active chain.
+    function testRevert_ExecuteSwap_InactiveContext() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INACTIVE_CONTEXT));
+        swapHook.executeSwap(address(metaWallet));
+    }
+
+    /// @notice storeSwapContextStatic must revert H1I8 when called outside an active chain.
+    /// @dev Prevents planting a lying _swapContext that downstream hooks consuming
+    ///      getOutputAmount() would read as truth.
+    function testRevert_StoreSwapContextStatic_InactiveContext() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INACTIVE_CONTEXT));
+        swapHook.storeSwapContextStatic(address(USDC_MAINNET), WETH, 1, address(metaWallet));
+    }
+
+    /// @notice validateMinOutput must revert H1I8 when called outside an active chain.
+    function testRevert_ValidateMinOutput_InactiveContext() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOKONEINCH_INACTIVE_CONTEXT));
+        swapHook.validateMinOutput(0);
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         IDEMPOTENT CHAIN INIT
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Calling initializeHookContext a second time must wipe any stale state
+    ///         left over from a chain that aborted without reaching finalize.
+    /// @dev Plants _swapContext via a legit chain, then calls init again as owner —
+    ///      state must be zero afterwards. This tests the invariant "init always
+    ///      starts clean" even though the happy path already clears in finalize.
+    function test_InitializeHookContext_ClearsStaleState() public {
+        // First chain: run a static swap so _swapContext gets populated.
+        OneInchSwapHook.SwapData memory _swapData = OneInchSwapHook.SwapData({
+            router: address(oneInchRouter),
+            amountIn: SWAP_AMOUNT,
+            minAmountOut: 0,
+            value: 0,
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
+        });
+
+        deal(USDC_MAINNET, address(metaWallet), SWAP_AMOUNT);
+        deal(WETH, address(oneInchRouter), SWAP_AMOUNT * 1e12);
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: SWAP_HOOK_ID, data: abi.encode(_swapData) });
+
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
+
+        // After finalize, context should already be clean. Read it to silence the
+        // unused-var warning and document that the pre-init state is not asserted —
+        // the invariant we care about is that init produces a clean state
+        // regardless of what was there before.
+        OneInchSwapHook.SwapContext memory _ctxBeforeInit = swapHook.getSwapContext();
+        _ctxBeforeInit;
+
+        // Second chain: just init, don't run anything, don't finalize. Verify init's
+        // idempotent clear zeros every field.
+        vm.prank(address(metaWallet));
+        swapHook.initializeHookContext();
+
+        OneInchSwapHook.SwapContext memory _ctxAfterInit = swapHook.getSwapContext();
+        assertEq(_ctxAfterInit.srcToken, address(0), "srcToken not cleared");
+        assertEq(_ctxAfterInit.dstToken, address(0), "dstToken not cleared");
+        assertEq(_ctxAfterInit.amountIn, 0, "amountIn not cleared");
+        assertEq(_ctxAfterInit.amountOut, 0, "amountOut not cleared");
+        assertEq(_ctxAfterInit.receiver, address(0), "receiver not cleared");
+        assertEq(_ctxAfterInit.timestamp, 0, "timestamp not cleared");
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         V6 ABI STABILITY
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Pins the V6 GenericRouter.swap selector to 0x07ed2379.
+    /// @dev If this fails, I1InchAggregationRouterV6 has drifted from the mainnet
+    ///      Sourcify-verified source at 0x111111125421cA6dc452d289314280a0f8842A65.
+    ///      Calldata built by _buildSwapCalldata would then target a different
+    ///      function — potentially routing funds into an unintended code path.
+    function test_V6SwapSelector_IsStable() public pure {
+        assertEq(I1InchAggregationRouterV6.swap.selector, bytes4(0x07ed2379), "V6 swap selector drift");
+    }
+
     /* ///////////////////////////////////////////////////////////////
                          HELPER FUNCTIONS
     ///////////////////////////////////////////////////////////////*/
 
-    /// @notice Build 1inch swap calldata using the generic swap function
-    function _build1InchSwapCalldata(
-        address _srcToken,
-        address _dstToken,
-        address _srcReceiver,
-        address _dstReceiver,
-        uint256 _amount,
-        uint256 _minReturnAmount
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
-        I1InchAggregationRouterV6.SwapDescription memory desc = I1InchAggregationRouterV6.SwapDescription({
-            srcToken: IERC20(_srcToken),
-            dstToken: IERC20(_dstToken),
-            srcReceiver: payable(_srcReceiver),
-            dstReceiver: payable(_dstReceiver),
-            amount: _amount,
-            minReturnAmount: _minReturnAmount,
-            flags: 0 // no partial fill
+    /// @dev Minimal valid SwapData used by the direct-call guard tests as a baseline
+    ///      they mutate by flipping a single field. Uses the whitelisted mock router,
+    ///      mainnet USDC/WETH, and flags=0.
+    function _defaultSwapData() internal view returns (OneInchSwapHook.SwapData memory) {
+        return OneInchSwapHook.SwapData({
+            router: address(oneInchRouter),
+            amountIn: SWAP_AMOUNT,
+            minAmountOut: 0,
+            value: 0,
+            data: "",
+            executor: address(0),
+            srcToken: USDC_MAINNET,
+            dstToken: WETH,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
-
-        bytes memory swapData = abi.encode(
-            address(0), // executor (not used for simple swaps)
-            desc,
-            bytes(""), // permit
-            bytes("") // extra data
-        );
-
-        return abi.encodePacked(I1InchAggregationRouterV6.swap.selector, swapData);
     }
 
     /// @notice Helper to execute a deposit via hook execution
@@ -1109,18 +1350,19 @@ contract OneInchSwapHookTest is BaseTest {
 
     /// @notice Helper to execute a swap via hook execution
     function _executeSwap(address _srcToken, address _dstToken, uint256 _amount, uint256 _minOutput) internal {
-        bytes memory _swapCalldata =
-            oneInchRouter.encodeSwapCalldata(_srcToken, _dstToken, _amount, 0, address(metaWallet));
-
         OneInchSwapHook.SwapData memory _data = OneInchSwapHook.SwapData({
             router: address(oneInchRouter),
-            srcToken: _srcToken,
-            dstToken: _dstToken,
             amountIn: _amount,
             minAmountOut: _minOutput,
-            receiver: address(metaWallet),
             value: 0,
-            swapCalldata: _swapCalldata
+            data: "",
+            executor: address(0),
+            srcToken: _srcToken,
+            dstToken: _dstToken,
+            srcReceiver: address(oneInchRouter),
+            receiver: address(metaWallet),
+            routerMinReturn: 0,
+            flags: 0
         });
 
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
