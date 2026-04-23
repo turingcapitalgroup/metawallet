@@ -151,7 +151,7 @@ contract DeployMultiWalletScript is Script, DeploymentManager {
         wallet.proxy = _deployProxy(walletConfig, config, shared, factory, registry, wallet.asset);
 
         // Step 3: Setup VaultModule and hooks
-        _setupVaultAndHooks(wallet, walletConfig, shared);
+        _setupVaultAndHooks(wallet, walletConfig, config, shared);
 
         return wallet;
     }
@@ -190,14 +190,15 @@ contract DeployMultiWalletScript is Script, DeploymentManager {
     function _setupVaultAndHooks(
         WalletDeployment memory wallet,
         WalletConfig memory walletConfig,
+        MultiWalletConfig memory config,
         SharedContractAddresses memory shared
     )
         internal
     {
         MetaWallet metaWallet = MetaWallet(payable(wallet.proxy));
 
-        // Grant ADMIN_ROLE to deployer
-        metaWallet.grantRoles(msg.sender, 1); // ADMIN_ROLE = 1
+        // Grant ADMIN_ROLE to admin
+        metaWallet.grantRoles(config.roles.admin, 1); // ADMIN_ROLE = 1
         _log("ADMIN_ROLE granted to deployer");
 
         // Setup VaultModule
