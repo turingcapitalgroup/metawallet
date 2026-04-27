@@ -6,13 +6,13 @@ import { ReentrancyGuard } from "solady/utils/ReentrancyGuard.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 // Local Interfaces
-import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
-import { IHook } from "metawallet/src/interfaces/IHook.sol";
-import { IHookResult } from "metawallet/src/interfaces/IHookResult.sol";
 import {
     I1InchAggregationRouterV6,
     IAggregationExecutor
 } from "metawallet/src/interfaces/I1InchAggregationRouterV6.sol";
+import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
+import { IHook } from "metawallet/src/interfaces/IHook.sol";
+import { IHookResult } from "metawallet/src/interfaces/IHookResult.sol";
 
 // External Libraries
 import { Execution } from "minimal-smart-account/interfaces/IMinimalSmartAccount.sol";
@@ -396,8 +396,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable, ReentrancyGuard {
         });
 
         _callData = abi.encodeCall(
-            I1InchAggregationRouterV6.swap,
-            (IAggregationExecutor(_swapData.executor), _desc, _swapData.data)
+            I1InchAggregationRouterV6.swap, (IAggregationExecutor(_swapData.executor), _desc, _swapData.data)
         );
     }
 

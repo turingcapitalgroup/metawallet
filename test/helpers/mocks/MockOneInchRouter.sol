@@ -77,10 +77,7 @@ contract MockOneInchRouter {
             actualAmount = msg.value;
             require(actualAmount > 0, "No ETH sent");
         } else {
-            require(
-                desc.srcToken.transferFrom(msg.sender, address(this), actualAmount),
-                "Transfer failed"
-            );
+            require(desc.srcToken.transferFrom(msg.sender, address(this), actualAmount), "Transfer failed");
         }
 
         spentAmount = actualAmount;

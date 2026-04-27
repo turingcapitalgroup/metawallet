@@ -18,10 +18,10 @@ import { OneInchSwapHook } from "metawallet/src/hooks/OneInchSwapHook.sol";
 import { VaultModule } from "metawallet/src/modules/VaultModule.sol";
 
 // Local Interfaces
+import { I1InchAggregationRouterV6 } from "metawallet/src/interfaces/I1InchAggregationRouterV6.sol";
 import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
 import { IHookExecution } from "metawallet/src/interfaces/IHookExecution.sol";
 import { IMetaWallet } from "metawallet/src/interfaces/IMetaWallet.sol";
-import { I1InchAggregationRouterV6 } from "metawallet/src/interfaces/I1InchAggregationRouterV6.sol";
 
 // Mock Contracts
 import { MockOneInchRouter } from "metawallet/test/helpers/mocks/MockOneInchRouter.sol";

@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { OwnableRoles } from "solady/auth/OwnableRoles.sol";
 import { ERC4626 } from "solady/tokens/ERC4626.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
+import { ReentrancyGuard } from "solady/utils/ReentrancyGuard.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 import { IModule } from "kam/interfaces/modules/IModule.sol";
@@ -22,7 +23,7 @@ import {
 /// @title VaultModule
 /// @notice A module for managing vault assets with virtual totalAssets tracking.
 /// All state is stored in a single, unique storage slot to prevent collisions.
-contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule {
+contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule, ReentrancyGuard {
     using SafeTransferLib for address;
 
     /* //////////////////////////////////////////////////////////////
@@ -142,7 +143,7 @@ contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule {
 
     /// @inheritdoc ERC4626
     /// @dev Enforces WHITELISTED_ROLE and not paused. Updates virtualTotalAssets.
-    function deposit(uint256 assets, address receiver) public override returns (uint256 shares) {
+    function deposit(uint256 assets, address receiver) public override nonReentrant returns (uint256 shares) {
         _checkWhitelistedRole();
         _checkNotPaused();
         shares = super.deposit(assets, receiver);
@@ -151,7 +152,7 @@ contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule {
 
     /// @inheritdoc ERC4626
     /// @dev Enforces WHITELISTED_ROLE and not paused. Updates virtualTotalAssets.
-    function mint(uint256 shares, address receiver) public override returns (uint256 assets) {
+    function mint(uint256 shares, address receiver) public override nonReentrant returns (uint256 assets) {
         _checkWhitelistedRole();
         _checkNotPaused();
         assets = super.mint(shares, receiver);
@@ -160,7 +161,7 @@ contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule {
 
     /// @inheritdoc ERC4626
     /// @dev Enforces not paused. Updates virtualTotalAssets.
-    function redeem(uint256 shares, address to, address owner) public override returns (uint256 assets) {
+    function redeem(uint256 shares, address to, address owner) public override nonReentrant returns (uint256 assets) {
         _checkNotPaused();
         assets = convertToAssets(shares);
         require(assets <= totalIdle(), VAULTMODULE_INSUFFICIENT_IDLE);
@@ -170,7 +171,7 @@ contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule {
 
     /// @inheritdoc ERC4626
     /// @dev Enforces not paused. Updates virtualTotalAssets.
-    function withdraw(uint256 assets, address to, address owner) public override returns (uint256 shares) {
+    function withdraw(uint256 assets, address to, address owner) public override nonReentrant returns (uint256 shares) {
         _checkNotPaused();
         require(assets <= totalIdle(), VAULTMODULE_INSUFFICIENT_IDLE);
         shares = super.withdraw(assets, to, owner);
