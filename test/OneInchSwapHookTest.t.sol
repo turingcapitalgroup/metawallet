@@ -122,10 +122,11 @@ contract OneInchSwapHookTest is BaseTest {
         MetaWallet(payable(address(metaWallet))).installHook(REDEEM_HOOK_ID, address(redeemHook));
         vm.stopPrank();
 
-        // Whitelist routers in swap hook
+        // Whitelist routers in swap hook and vault in deposit hook
         vm.startPrank(address(metaWallet));
         swapHook.setRouterAllowed(address(oneInchRouter), true);
         swapHook.setRouterAllowed(ONEINCH_ROUTER, true);
+        depositHook.setVaultAllowed(VAULT_A, true);
         vm.stopPrank();
 
         // Whitelist contracts in registry
