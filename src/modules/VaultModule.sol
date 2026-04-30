@@ -235,8 +235,10 @@ contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule, Reentrancy
     function setMaxAllowedDelta(uint256 _maxAllowedDelta) external {
         _checkAdminRole();
         require(_maxAllowedDelta <= BPS_DENOMINATOR, VAULTMODULE_INVALID_BPS);
-        _getVaultModuleStorage().maxAllowedDelta = _maxAllowedDelta;
-        emit MaxAllowedDeltaUpdated(_maxAllowedDelta);
+        VaultModuleStorage storage $ = _getVaultModuleStorage();
+        uint256 _oldMaxAllowedDelta = $.maxAllowedDelta;
+        $.maxAllowedDelta = _maxAllowedDelta;
+        emit MaxAllowedDeltaUpdated(msg.sender, _oldMaxAllowedDelta, _maxAllowedDelta);
     }
 
     /* //////////////////////////////////////////////////////////////
@@ -248,9 +250,10 @@ contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule, Reentrancy
         _checkManagerRole();
         VaultModuleStorage storage $ = _getVaultModuleStorage();
 
+        uint256 _previousTotalAssets = $.virtualTotalAssets;
         uint256 _maxDelta = $.maxAllowedDelta;
         if (_maxDelta > 0) {
-            uint256 _currentTotalAssets = $.virtualTotalAssets;
+            uint256 _currentTotalAssets = _previousTotalAssets;
             if (_currentTotalAssets > 0) {
                 uint256 _delta = _newTotalAssets > _currentTotalAssets
                     ? _newTotalAssets - _currentTotalAssets
@@ -262,7 +265,13 @@ contract VaultModule is IVaultModule, ERC4626, OwnableRoles, IModule, Reentrancy
 
         $.virtualTotalAssets = _newTotalAssets;
         $.merkleRoot = _merkleRoot;
-        emit SettlementExecuted(_newTotalAssets, _merkleRoot);
+        emit SettlementExecuted(
+            msg.sender,
+            _previousTotalAssets,
+            _newTotalAssets,
+            int256(_newTotalAssets) - int256(_previousTotalAssets),
+            _merkleRoot
+        );
     }
 
     /* //////////////////////////////////////////////////////////////
