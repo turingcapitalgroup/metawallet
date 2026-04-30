@@ -117,7 +117,6 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
         external
         view
         override
-        onlyOwner
         returns (Execution[] memory _executions)
     {
         ApproveAndDepositData memory _depositData = abi.decode(_data, (ApproveAndDepositData));
@@ -364,7 +363,7 @@ contract ERC4626ApproveAndDepositHook is IHook, IHookResult, Ownable {
     /// @notice Validates that the deposit produced at least the minimum expected shares
     /// @dev This function is called as part of the execution chain for slippage protection
     /// @param _minShares The minimum expected shares
-    function validateMinShares(uint256 _minShares) external view onlyOwner {
+    function validateMinShares(uint256 _minShares) external view {
         require(_depositContext.sharesReceived >= _minShares, HOOK4626DEPOSIT_INSUFFICIENT_SHARES);
     }
 

@@ -171,7 +171,6 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable, ReentrancyGuard {
         external
         view
         override
-        onlyOwner
         returns (Execution[] memory _executions)
     {
         SwapData memory _swapData = abi.decode(_data, (SwapData));
@@ -505,7 +504,7 @@ contract OneInchSwapHook is IHook, IHookResult, Ownable, ReentrancyGuard {
 
     /// @notice Validates that the swap produced at least the minimum expected output
     /// @param _minAmountOut The minimum expected output amount
-    function validateMinOutput(uint256 _minAmountOut) external view onlyOwner onlyInsideChain {
+    function validateMinOutput(uint256 _minAmountOut) external view onlyInsideChain {
         require(_swapContext.amountOut >= _minAmountOut, HOOKONEINCH_INSUFFICIENT_OUTPUT);
     }
 
