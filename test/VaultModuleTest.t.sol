@@ -1034,8 +1034,8 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         uint256 _maxDelta = 500; // 5%
 
         vm.prank(users.admin);
-        vm.expectEmit(true, false, false, false);
-        emit IVaultModule.MaxAllowedDeltaUpdated(_maxDelta);
+        vm.expectEmit(true, false, false, true);
+        emit IVaultModule.MaxAllowedDeltaUpdated(users.admin, 1000, _maxDelta);
         metaWallet.setMaxAllowedDelta(_maxDelta);
     }
 

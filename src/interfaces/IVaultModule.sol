@@ -7,7 +7,13 @@ interface IVaultModule {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Emitted when a settlement is executed
-    event SettlementExecuted(uint256 indexed totalAssets, bytes32 indexed merkleRoot);
+    event SettlementExecuted(
+        address indexed operator,
+        uint256 previousTotalAssets,
+        uint256 newTotalAssets,
+        int256 delta,
+        bytes32 indexed merkleRoot
+    );
 
     /// @notice Emitted when the vault is paused
     event Paused(address indexed account);
@@ -16,7 +22,7 @@ interface IVaultModule {
     event Unpaused(address indexed account);
 
     /// @notice Emitted when the max allowed delta is updated
-    event MaxAllowedDeltaUpdated(uint256 indexed maxAllowedDelta);
+    event MaxAllowedDeltaUpdated(address indexed operator, uint256 oldMaxAllowedDelta, uint256 newMaxAllowedDelta);
 
     /// @notice Initializes the vault logic with asset and token metadata
     /// @param _asset The address of the underlying asset
