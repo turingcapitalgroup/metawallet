@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 
 import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
+import { Ownable } from "metawallet/src/vendor/solady/auth/Ownable.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
@@ -194,8 +195,11 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
     function testRevert_Deposit_NotWhitelisted() public {
         deal(USDC_MAINNET, users.charlie, DEPOSIT_AMOUNT);
 
+        // VaultModule.deposit calls _checkWhitelistedRole, which goes through Solady's _checkRoles
+        // and reverts with Ownable.Unauthorized(). Bare expectRevert would also pass on unrelated
+        // reverts (insufficient allowance, etc) and mask role-check regressions.
         vm.prank(users.charlie);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.deposit(DEPOSIT_AMOUNT, users.charlie);
     }
 
@@ -254,7 +258,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         vm.startPrank(users.alice);
         metaWallet.deposit(_depositAmount, users.alice);
 
-        vm.expectRevert();
+        // Redeeming more shares than the vault has idle assets reverts with
+        // VAULTMODULE_INSUFFICIENT_IDLE ("VM7") before reaching the share burn — the vault
+        // checks idle-asset coverage first.
+        vm.expectRevert(bytes(Errors.VAULTMODULE_INSUFFICIENT_IDLE));
         metaWallet.redeem(_depositAmount + 1, users.alice, users.alice);
 
         vm.stopPrank();
@@ -337,8 +344,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         uint256 _newTotalAssets = 5000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT, _newTotalAssets));
 
+        // settleTotalAssets requires MANAGER_ROLE; Solady's _checkRoles reverts with
+        // Ownable.Unauthorized().
         vm.prank(users.alice);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
     }
 
@@ -364,8 +373,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
     }
 
     function testRevert_Pause_Unauthorized() public {
+        // pause() requires EMERGENCY_ADMIN_ROLE; Solady's role check reverts with Unauthorized.
         vm.prank(users.alice);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.pause();
     }
 
@@ -373,8 +383,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         vm.prank(users.charlie);
         metaWallet.pause();
 
+        // unpause() requires EMERGENCY_ADMIN_ROLE.
         vm.prank(users.alice);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.unpause();
     }
 
@@ -1040,8 +1051,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
     }
 
     function testRevert_SetMaxAllowedDelta_Unauthorized() public {
+        // setMaxAllowedDelta requires ADMIN_ROLE.
         vm.prank(users.alice);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.setMaxAllowedDelta(500);
     }
 
