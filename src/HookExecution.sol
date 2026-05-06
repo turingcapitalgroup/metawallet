@@ -43,7 +43,7 @@ abstract contract HookExecution is IHookExecution {
 
     // keccak256(abi.encode(uint256(keccak256("metawallet.storage.HookExecution")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant HOOKS_STORAGE_LOCATION =
-        0x84561f583180cd92b2d787d13f2354aaa07b9087fa805467f0e3f5d2c4229100;
+        0x794e800a94f9c768e137a763a8a496d0195c3c05d59e45903e747ec4ed443b00;
 
     /* ///////////////////////////////////////////////////////////////
                           STORAGE ACCESS

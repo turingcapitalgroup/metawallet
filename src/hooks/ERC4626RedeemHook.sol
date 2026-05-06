@@ -105,7 +105,6 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
         external
         view
         override
-        onlyOwner
         returns (Execution[] memory _executions)
     {
         RedeemData memory _redeemData = abi.decode(_data, (RedeemData));
@@ -320,7 +319,7 @@ contract ERC4626RedeemHook is IHook, IHookResult, Ownable {
     /// @notice Validates that the redemption produced at least the minimum expected assets
     /// @dev This function is called as part of the execution chain for slippage protection
     /// @param _minAssets The minimum expected assets
-    function validateMinAssets(uint256 _minAssets) external view onlyOwner {
+    function validateMinAssets(uint256 _minAssets) external view {
         require(_redeemContext.assetsReceived >= _minAssets, HOOK4626REDEEM_INSUFFICIENT_ASSETS);
     }
 

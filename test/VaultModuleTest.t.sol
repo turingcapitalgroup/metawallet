@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 
 import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
+import { Ownable } from "metawallet/src/vendor/solady/auth/Ownable.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
@@ -103,6 +104,11 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         MetaWallet(payable(address(metaWallet))).installHook(REDEEM_HOOK_ID, address(redeemHook));
         vm.stopPrank();
 
+        vm.startPrank(address(metaWallet));
+        depositHook.setVaultAllowed(EXTERNAL_VAULT_A, true);
+        depositHook.setVaultAllowed(EXTERNAL_VAULT_B, true);
+        vm.stopPrank();
+
         registry.whitelistTarget(address(depositHook));
         registry.whitelistTarget(address(redeemHook));
         registry.whitelistTarget(address(USDC_MAINNET));
@@ -189,8 +195,11 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
     function testRevert_Deposit_NotWhitelisted() public {
         deal(USDC_MAINNET, users.charlie, DEPOSIT_AMOUNT);
 
+        // VaultModule.deposit calls _checkWhitelistedRole, which goes through Solady's _checkRoles
+        // and reverts with Ownable.Unauthorized(). Bare expectRevert would also pass on unrelated
+        // reverts (insufficient allowance, etc) and mask role-check regressions.
         vm.prank(users.charlie);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.deposit(DEPOSIT_AMOUNT, users.charlie);
     }
 
@@ -249,7 +258,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         vm.startPrank(users.alice);
         metaWallet.deposit(_depositAmount, users.alice);
 
-        vm.expectRevert();
+        // Redeeming more shares than the vault has idle assets reverts with
+        // VAULTMODULE_INSUFFICIENT_IDLE ("VM7") before reaching the share burn — the vault
+        // checks idle-asset coverage first.
+        vm.expectRevert(bytes(Errors.VAULTMODULE_INSUFFICIENT_IDLE));
         metaWallet.redeem(_depositAmount + 1, users.alice, users.alice);
 
         vm.stopPrank();
@@ -332,8 +344,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         uint256 _newTotalAssets = 5000 * _1_USDC;
         bytes32 _merkleRoot = keccak256(abi.encodePacked(EXTERNAL_VAULT, _newTotalAssets));
 
+        // settleTotalAssets requires MANAGER_ROLE; Solady's _checkRoles reverts with
+        // Ownable.Unauthorized().
         vm.prank(users.alice);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.settleTotalAssets(_newTotalAssets, _merkleRoot);
     }
 
@@ -359,8 +373,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
     }
 
     function testRevert_Pause_Unauthorized() public {
+        // pause() requires EMERGENCY_ADMIN_ROLE; Solady's role check reverts with Unauthorized.
         vm.prank(users.alice);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.pause();
     }
 
@@ -368,8 +383,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         vm.prank(users.charlie);
         metaWallet.pause();
 
+        // unpause() requires EMERGENCY_ADMIN_ROLE.
         vm.prank(users.alice);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.unpause();
     }
 
@@ -506,8 +522,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         assertEq(metaWallet.totalAssets(), _totalAssetsBefore);
         assertEq(metaWallet.sharePrice(), _sharePriceBefore);
@@ -531,8 +549,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _investHooks = new IHookExecution.HookExecution[](1);
         _investHooks[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _investHooks);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _investHooks);
+        vm.stopPrank();
 
         uint256 _externalShares = IERC4626(EXTERNAL_VAULT).balanceOf(address(metaWallet));
         uint256 _totalIdleBefore = metaWallet.totalIdle();
@@ -548,8 +568,10 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _divestHooks = new IHookExecution.HookExecution[](1);
         _divestHooks[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _divestHooks);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _divestHooks);
+        vm.stopPrank();
 
         uint256 _totalIdleAfter = metaWallet.totalIdle();
         uint256 _externalSharesAfter = IERC4626(EXTERNAL_VAULT).balanceOf(address(metaWallet));
@@ -976,8 +998,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _hooks = new IHookExecution.HookExecution[](1);
         _hooks[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hooks);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hooks);
+        vm.stopPrank();
     }
 
     function _divestFromStrategy() internal {
@@ -994,8 +1017,9 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         IHookExecution.HookExecution[] memory _hooks = new IHookExecution.HookExecution[](1);
         _hooks[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hooks);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hooks);
+        vm.stopPrank();
     }
 
     function _redeemUserShares(address _user, uint256 _shares) internal returns (uint256) {
@@ -1021,14 +1045,15 @@ contract VaultModuleTest is BaseTest, ERC4626Events {
         uint256 _maxDelta = 500; // 5%
 
         vm.prank(users.admin);
-        vm.expectEmit(true, false, false, false);
-        emit IVaultModule.MaxAllowedDeltaUpdated(_maxDelta);
+        vm.expectEmit(true, false, false, true);
+        emit IVaultModule.MaxAllowedDeltaUpdated(users.admin, 1000, _maxDelta);
         metaWallet.setMaxAllowedDelta(_maxDelta);
     }
 
     function testRevert_SetMaxAllowedDelta_Unauthorized() public {
+        // setMaxAllowedDelta requires ADMIN_ROLE.
         vm.prank(users.alice);
-        vm.expectRevert();
+        vm.expectRevert(Ownable.Unauthorized.selector);
         metaWallet.setMaxAllowedDelta(500);
     }
 
