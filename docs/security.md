@@ -13,7 +13,8 @@ MetaWallet uses Solady's `OwnableRoles` for role management. Roles are bitmask-b
 | Role | Constant | Slot | Bitmask Value | Description |
 |------|----------|------|---------------|-------------|
 | Admin | `ADMIN_ROLE` | `_ROLE_0` | 1 | Full administrative control |
-| Whitelisted | `WHITELISTED_ROLE` | `_ROLE_1` | 2 | Deposit access (deposit) |
+| Executor | `EXECUTOR_ROLE` | `_ROLE_1` | 2 | Execute transactions |
+| Whitelisted | `WHITELISTED_ROLE` | `_ROLE_2` | 4 | Deposit access (deposit) |
 | Manager | `MANAGER_ROLE` | `_ROLE_4` | 16 | Settlement operations |
 | Emergency Admin | `EMERGENCY_ADMIN_ROLE` | `_ROLE_6` | 64 | Pause/unpause vault |
 
@@ -25,8 +26,11 @@ MetaWallet uses Solady's `OwnableRoles` for role management. Roles are bitmask-b
 - Initialize the vault (`initializeVault`)
 - Set the maximum allowed settlement delta (`setMaxAllowedDelta`)
 
-**WHITELISTED_ROLE (`_ROLE_1 = 2`)**
-- Call `deposit` on the vault
+**EXECUTOR_ROLE (`_ROLE_1 = 2`)**
+- Execute transactions via `execute()` and `executeWithHookExecution()`
+
+**WHITELISTED_ROLE (`_ROLE_2 = 4`)**
+- Call `deposit` and `mint` on the vault
 - This role controls who can initiate deposits into the vault
 
 **MANAGER_ROLE (`_ROLE_4 = 16`)**
@@ -37,14 +41,7 @@ MetaWallet uses Solady's `OwnableRoles` for role management. Roles are bitmask-b
 - Pause the vault (`pause`)
 - Unpause the vault (`unpause`)
 
-### Role Overlap: WHITELISTED and EXECUTOR
 
-`WHITELISTED_ROLE` and `EXECUTOR_ROLE` (from `MinimalSmartAccount`) both map to `_ROLE_1`. Since Solady roles are bitmask-based, granting one automatically grants the other. This means:
-
-- Any address whitelisted for deposits can also execute wallet operations via `executeWithHookExecution`.
-- Any executor can also call `deposit`.
-
-This is a deliberate design decision. Operators interacting with the system need both capabilities: submitting deposits on behalf of users and executing strategy operations.
 
 ---
 
@@ -245,6 +242,8 @@ All error codes use contract-specific prefixes for debugging. Errors are defined
 | `HE2` | `HOOKEXECUTION_HOOK_ALREADY_INSTALLED` | Hook ID already has an installed address |
 | `HE3` | `HOOKEXECUTION_HOOK_NOT_INSTALLED` | Hook ID not found in registry |
 | `HE4` | `HOOKEXECUTION_EMPTY_HOOK_CHAIN` | Empty hook execution array passed |
+| `HE5` | `HOOKEXECUTION_DEADLINE_EXPIRED` | Execution deadline has passed |
+| `HE6` | `HOOKEXECUTION_INVALID_NONCE` | Nonce does not match expected value |
 
 ### VaultModule Errors (VM)
 
@@ -256,6 +255,7 @@ All error codes use contract-specific prefixes for debugging. Errors are defined
 | `VM4` | `VAULTMODULE_MISMATCHED_ARRAYS` | Strategy and value arrays have different lengths |
 | `VM5` | `VAULTMODULE_DELTA_EXCEEDS_MAX` | Settlement delta exceeds `maxAllowedDelta` |
 | `VM6` | `VAULTMODULE_INVALID_BPS` | BPS value exceeds 10000 |
+| `VM7` | `VAULTMODULE_INSUFFICIENT_IDLE` | Insufficient idle assets for withdrawal |
 
 ### ERC4626 Deposit Hook Errors (H4D)
 
@@ -264,6 +264,8 @@ All error codes use contract-specific prefixes for debugging. Errors are defined
 | `H4D1` | `HOOK4626DEPOSIT_INVALID_HOOK_DATA` | Invalid deposit data (zero vault, zero receiver, zero assets) |
 | `H4D4` | `HOOK4626DEPOSIT_INSUFFICIENT_SHARES` | Shares received below `minShares` threshold |
 | `H4D6` | `HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND` | Dynamic amount requested but no previous hook in chain |
+| `H4D7` | `HOOK4626DEPOSIT_VAULT_NOT_ALLOWED` | Vault address not in the allowed whitelist |
+| `H4D8` | `HOOK4626DEPOSIT_INVALID_VAULT` | Vault address is `address(0)` |
 
 ### ERC4626 Redeem Hook Errors (H4R)
 
@@ -282,6 +284,9 @@ All error codes use contract-specific prefixes for debugging. Errors are defined
 | `H1I3` | `HOOKONEINCH_INSUFFICIENT_OUTPUT` | Output amount below `minAmountOut` threshold |
 | `H1I4` | `HOOKONEINCH_INVALID_ROUTER` | Router address is `address(0)` |
 | `H1I5` | `HOOKONEINCH_ROUTER_NOT_ALLOWED` | Router address not in the allowed whitelist |
+| `H1I6` | `HOOKONEINCH_RESIDUAL_SOURCE_TOKENS` | Source tokens remain stranded after swap |
+| `H1I7` | `HOOKONEINCH_INVALID_FLAGS` | Swap description flags are not zero |
+| `H1I8` | `HOOKONEINCH_INACTIVE_CONTEXT` | Hook called outside of an active execution chain |
 
 ---
 
@@ -331,6 +336,4 @@ The `ADMIN_ROLE` holder has broad control:
 
 This role should be held by a multisig or governance contract in production.
 
-### Executor / Whitelisted Overlap
 
-Since `EXECUTOR_ROLE` and `WHITELISTED_ROLE` share `_ROLE_1`, granting deposit access to an address also grants execution access. Ensure that addresses granted `_ROLE_1` are trusted with both capabilities.
