@@ -42,7 +42,6 @@ MetaWallet uses Solady's `OwnableRoles` for role management. Roles are bitmask-b
 - Unpause the vault (`unpause`)
 
 
-
 ---
 
 ## 2. Registry Authorization
