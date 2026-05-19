@@ -104,6 +104,12 @@ contract HookChainTest is BaseTest {
         MetaWallet(payable(address(metaWallet))).installHook(REDEEM_HOOK_ID, address(redeemHook));
         vm.stopPrank();
 
+        // Whitelist test vaults in the deposit hook
+        vm.startPrank(address(metaWallet));
+        depositHook.setVaultAllowed(VAULT_A, true);
+        depositHook.setVaultAllowed(VAULT_B, true);
+        vm.stopPrank();
+
         // Whitelist hook contracts and vaults in registry
         registry.whitelistTarget(address(depositHook));
         registry.whitelistTarget(address(redeemHook));
@@ -145,8 +151,10 @@ contract HookChainTest is BaseTest {
         uint256 _usdcBalanceBefore = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _sharesBalanceBefore = VAULT_A.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _usdcBalanceAfter = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _sharesBalanceAfter = VAULT_A.balanceOf(address(metaWallet));
@@ -172,8 +180,10 @@ contract HookChainTest is BaseTest {
         uint256 _usdcBalanceBefore = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _sharesBalanceBefore = VAULT_A.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _usdcBalanceAfter = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _sharesBalanceAfter = VAULT_A.balanceOf(address(metaWallet));
@@ -206,8 +216,10 @@ contract HookChainTest is BaseTest {
 
         uint256 _usdcStart = USDC_MAINNET.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _usdcEnd = USDC_MAINNET.balanceOf(address(metaWallet));
         uint256 _sharesEnd = VAULT_A.balanceOf(address(metaWallet));
@@ -243,8 +255,10 @@ contract HookChainTest is BaseTest {
         _hookExecutions[1] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
         _hookExecutions[2] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositDataB) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _sharesA = VAULT_A.balanceOf(address(metaWallet));
         uint256 _sharesB = VAULT_B.balanceOf(address(metaWallet));
@@ -285,8 +299,10 @@ contract HookChainTest is BaseTest {
         _hookExecutions[1] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeem1) });
         _hookExecutions[2] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_deposit2) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _sharesA = VAULT_A.balanceOf(address(metaWallet));
         uint256 _sharesB = VAULT_B.balanceOf(address(metaWallet));
@@ -311,9 +327,10 @@ contract HookChainTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
+        uint256 _nonce = metaWallet.nonce();
         vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_PREVIOUS_HOOK_NOT_FOUND));
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
     }
 
     function testRevert_SlippageProtection_InsufficientShares() public {
@@ -329,9 +346,10 @@ contract HookChainTest is BaseTest {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
         // This should fail due to slippage check
+        uint256 _nonce = metaWallet.nonce();
         vm.startPrank(users.owner);
         vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_INSUFFICIENT_SHARES));
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
     }
 
     function testRevert_UnauthorizedExecution() public {
@@ -343,9 +361,10 @@ contract HookChainTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
+        uint256 _nonce = metaWallet.nonce();
         vm.startPrank(users.alice);
         vm.expectRevert("Unauthorized()");
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -386,8 +405,10 @@ contract HookChainTest is BaseTest {
 
         uint256 _usdcBefore = USDC_MAINNET.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _usdcAfter = USDC_MAINNET.balanceOf(address(metaWallet));
         assertApproxEqAbs(_usdcAfter, _usdcBefore, 2, "Should recover ~same USDC from deposit->redeem chain");
@@ -435,8 +456,10 @@ contract HookChainTest is BaseTest {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
         _hookExecutions[1] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _sharesAfter = VAULT_A.balanceOf(address(metaWallet));
         assertApproxEqAbs(
@@ -523,8 +546,10 @@ contract HookChainTest is BaseTest {
 
         uint256 _usdcBefore = USDC_MAINNET.balanceOf(address(metaWallet));
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         uint256 _usdcAfter = USDC_MAINNET.balanceOf(address(metaWallet));
         assertApproxEqAbs(_usdcAfter, _usdcBefore, 2, "Should recover almost all USDC");
@@ -582,12 +607,83 @@ contract HookChainTest is BaseTest {
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
         _hookExecutions[1] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_redeemData) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
 
         // Verify the vault token (share token) approval from metaWallet to redeemHook is reset to 0
         uint256 _allowance = IERC20(VAULT_A).allowance(address(metaWallet), address(redeemHook));
         assertEq(_allowance, 0, "Vault token approval from metaWallet to redeemHook should be reset to 0");
+    }
+
+    /* ///////////////////////////////////////////////////////////////
+                         VAULT WHITELIST TESTS
+    ///////////////////////////////////////////////////////////////*/
+
+    /// @notice Hook data targeting a non-whitelisted vault must revert during buildExecutions
+    function testRevert_BuildExecutions_VaultNotAllowed() public {
+        address _evilVault = makeAddr("EvilVault");
+
+        ERC4626ApproveAndDepositHook.ApproveAndDepositData memory _depositData =
+            ERC4626ApproveAndDepositHook.ApproveAndDepositData({
+                vault: _evilVault, assets: DEPOSIT_AMOUNT, receiver: address(metaWallet), minShares: 0
+            });
+
+        IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
+        _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_depositData) });
+
+        uint256 _nonce = metaWallet.nonce();
+        vm.startPrank(users.owner);
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
+        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(_nonce, block.timestamp, _hookExecutions);
+        vm.stopPrank();
+    }
+
+    /// @notice Direct call to approveForDepositStatic with a non-whitelisted vault must revert
+    function testRevert_ApproveForDepositStatic_VaultNotAllowed() public {
+        address _evilVault = makeAddr("EvilVault");
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
+        depositHook.approveForDepositStatic(USDC_MAINNET, _evilVault, 1000);
+    }
+
+    /// @notice Direct call to executeDepositStatic with a non-whitelisted vault must revert
+    function testRevert_ExecuteDepositStatic_VaultNotAllowed() public {
+        address _evilVault = makeAddr("EvilVault");
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
+        depositHook.executeDepositStatic(_evilVault, 1000, address(metaWallet));
+    }
+
+    /// @notice Non-owner calling setVaultAllowed must revert with Ownable.Unauthorized
+    function testRevert_SetVaultAllowed_Unauthorized() public {
+        address _newVault = makeAddr("NewVault");
+        vm.prank(users.alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        depositHook.setVaultAllowed(_newVault, true);
+    }
+
+    /// @notice setVaultAllowed rejects the zero address
+    function testRevert_SetVaultAllowed_ZeroAddress() public {
+        vm.prank(address(metaWallet));
+        vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_INVALID_VAULT));
+        depositHook.setVaultAllowed(address(0), true);
+    }
+
+    /// @notice setVaultAllowed toggles whitelist status and is reflected in isVaultAllowed
+    function test_SetVaultAllowed_TogglesWhitelist() public {
+        address _newVault = makeAddr("NewVault");
+
+        assertFalse(depositHook.isVaultAllowed(_newVault), "Vault should not be allowed initially");
+
+        vm.prank(address(metaWallet));
+        depositHook.setVaultAllowed(_newVault, true);
+        assertTrue(depositHook.isVaultAllowed(_newVault), "Vault should be allowed after whitelisting");
+
+        vm.prank(address(metaWallet));
+        depositHook.setVaultAllowed(_newVault, false);
+        assertFalse(depositHook.isVaultAllowed(_newVault), "Vault should not be allowed after removal");
     }
 
     /* ///////////////////////////////////////////////////////////////
@@ -612,8 +708,10 @@ contract HookChainTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: DEPOSIT_HOOK_ID, data: abi.encode(_data) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 
     /// @notice Helper to execute a redeem via hook execution
@@ -629,7 +727,9 @@ contract HookChainTest is BaseTest {
         IHookExecution.HookExecution[] memory _hookExecutions = new IHookExecution.HookExecution[](1);
         _hookExecutions[0] = IHookExecution.HookExecution({ hookId: REDEEM_HOOK_ID, data: abi.encode(_data) });
 
-        vm.prank(users.owner);
-        MetaWallet(payable(address(metaWallet))).executeWithHookExecution(block.timestamp, _hookExecutions);
+        vm.startPrank(users.owner);
+        MetaWallet(payable(address(metaWallet)))
+            .executeWithHookExecution(metaWallet.nonce(), block.timestamp, _hookExecutions);
+        vm.stopPrank();
     }
 }

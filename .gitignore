@@ -8,7 +8,12 @@ out/
 # Dotenv file
 .env
 
-
 # Soldeer
 /dependencies
 soldeer.lock
+
+#AI
+.repo-audit/
+.trigrep
+.letta
+superpowers/

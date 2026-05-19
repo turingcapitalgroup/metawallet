@@ -455,7 +455,7 @@ require(_depositData.receiver != address(0), HOOK4626DEPOSIT_INVALID_HOOK_DATA);
 
 ```solidity
 uint256 public constant ADMIN_ROLE = _ROLE_0;
-uint256 public constant WHITELISTED_ROLE = _ROLE_1;
+uint256 public constant WHITELISTED_ROLE = _ROLE_2;
 uint256 public constant MANAGER_ROLE = _ROLE_4;
 uint256 public constant EMERGENCY_ADMIN_ROLE = _ROLE_6;
 

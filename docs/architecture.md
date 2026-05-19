@@ -365,17 +365,15 @@ The `merkleRoot` is a commitment to the breakdown of deployed assets across stra
 
 ### 6.1 Role System
 
-MetaWallet uses Solady's `OwnableRoles` for gas-efficient bitmap-based role management.
+MetaWallet uses Solady's `OwnableRoles` for gas-efficient bitmap-based role management, and Solady's `ReentrancyGuard` to prevent reentrancy attacks.
 
 | Role | Constant | Bit | Purpose |
 |---|---|---|---|
 | ADMIN | `_ROLE_0` | `1 << 0` | Install/uninstall hooks, install facets, initialize vault, set maxAllowedDelta |
-| WHITELISTED | `_ROLE_1` | `1 << 1` | Deposit into the vault (investor whitelist) |
-| EXECUTOR | `_ROLE_1` * | `1 << 1` | Execute transactions via `execute()` and `executeWithHookExecution()` |
+| EXECUTOR | `_ROLE_1` | `1 << 1` | Execute transactions via `execute()` and `executeWithHookExecution()` |
+| WHITELISTED | `_ROLE_2` | `1 << 2` | Deposit into the vault (investor whitelist) |
 | MANAGER | `_ROLE_4` | `1 << 4` | Call `settleTotalAssets` to update accounting |
 | EMERGENCY_ADMIN | `_ROLE_6` | `1 << 6` | Pause and unpause the vault |
-
-\* Note: In `MinimalSmartAccount`, EXECUTOR_ROLE is `_ROLE_1`. In `VaultModule`, WHITELISTED_ROLE is also `_ROLE_1`. Since VaultModule runs via delegatecall in MetaWallet's storage context, both share the same OwnableRoles bitmap. The EXECUTOR_ROLE and WHITELISTED_ROLE occupy the same bit position, meaning any address granted executor permission can also deposit, and vice versa.
 
 ### 6.2 Registry Authorization
 
