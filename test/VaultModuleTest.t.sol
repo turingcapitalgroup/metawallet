@@ -4,8 +4,8 @@ pragma solidity ^0.8.20;
 import { BaseTest } from "metawallet/test/base/BaseTest.t.sol";
 
 import { Ownable } from "metawallet/src/vendor/solady/auth/Ownable.sol";
-import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 import { Ownable } from "metawallet/src/vendor/solady/auth/Ownable.sol";
+import { MinimalUUPSFactory } from "minimal-uups-factory/MinimalUUPSFactory.sol";
 import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
