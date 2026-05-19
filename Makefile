@@ -3,7 +3,7 @@
 -include .env
 export
 
-.PHONY: help deploy-mainnet deploy-sepolia deploy-localhost deploy-all verify clean clean-all format-output \
+.PHONY: help compile deploy-mainnet deploy-sepolia deploy-localhost deploy-all verify clean clean-all format-output \
 	deploy-localhost-dry-run deploy-sepolia-dry-run deploy-mainnet-dry-run \
 	deploy-mocks-localhost-dry-run deploy-impl-localhost-dry-run deploy-proxy-localhost-dry-run \
 	deploy-hooks-localhost-dry-run install-hooks-localhost-dry-run \
@@ -372,6 +372,11 @@ clean-all:
 # ═══════════════════════════════════════════════════════════════════════════════
 # BUILD & TEST
 # ═══════════════════════════════════════════════════════════════════════════════
+
+## CI compile (fmt check + build with sizes)
+compile:
+	forge fmt --check
+	forge build --sizes
 
 ## Build the project
 build:
