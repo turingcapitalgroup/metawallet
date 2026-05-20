@@ -7,7 +7,7 @@ import { MerkleTreeLib } from "solady/utils/MerkleTreeLib.sol";
 import { ReentrancyGuard } from "solady/utils/ReentrancyGuard.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
-import { IModule } from "kam/interfaces/modules/IModule.sol";
+import { IModule } from "kam/src/interfaces/modules/IModule.sol";
 import { IVaultModule } from "metawallet/src/interfaces/IVaultModule.sol";
 
 import {

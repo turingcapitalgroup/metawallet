@@ -78,7 +78,6 @@ This design ensures share price stability during strategy operations, which is c
 | `MANAGER_ROLE` | Settle total assets and merkle roots |
 | `EMERGENCY_ADMIN_ROLE` | Pause/unpause the vault |
 
-> **Note**: `WHITELISTED_ROLE` and `EXECUTOR_ROLE` share the same role slot (`_ROLE_1`), so granting one automatically grants the other.
 
 ## User Flow
 

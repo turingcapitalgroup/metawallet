@@ -514,14 +514,18 @@ ERC-20 swaps and native ETH swaps.
 
 ```solidity
 struct SwapData {
-    address router;        // 1inch aggregation router address (must be whitelisted)
-    address srcToken;      // Source token to swap from
-    address dstToken;      // Destination token to swap to
-    uint256 amountIn;      // Amount to swap (or USE_PREVIOUS_HOOK_OUTPUT)
-    uint256 minAmountOut;  // Minimum output (0 to skip validation)
-    address receiver;      // Address that receives the swapped tokens
-    uint256 value;         // ETH value for native-ETH swaps
-    bytes   swapCalldata;  // Pre-built 1inch router calldata
+    address router;          // 1inch aggregation router address (must be whitelisted)
+    uint256 amountIn;        // Amount to swap (or USE_PREVIOUS_HOOK_OUTPUT)
+    uint256 minAmountOut;    // Hook-level minimum output (0 to skip validation)
+    uint256 value;           // ETH value for native-ETH swaps
+    bytes data;              // Opaque DEX-path payload passed to router
+    address executor;        // Aggregation executor for the swap
+    address srcToken;        // Source token to swap from
+    address dstToken;        // Destination token to swap to
+    address srcReceiver;     // Where the executor pulls src tokens from
+    address receiver;        // Final receiver of dst tokens
+    uint256 routerMinReturn; // Router-level minimum return
+    uint256 flags;           // MUST be 0 (allow-list approach)
 }
 ```
 
@@ -590,7 +594,7 @@ When `amountIn == USE_PREVIOUS_HOOK_OUTPUT`:
 ```
   Execution Index   Target          Action
   ---------------   ------          ------
-  [0]               hook            resolveDynamicAmount(previousHook, router, src, dst, value, calldata)
+  [0]               hook            resolveDynamicAmount(previousHook, swapData)
   [1]               hook            approveForSwap(router)
   [2]               hook            executeSwap(receiver)
   [3]               hook            resetSwapApproval()
