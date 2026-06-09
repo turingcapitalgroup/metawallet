@@ -866,7 +866,7 @@ function onSell(
     address seller,
     address receiver,
     bytes memory data
-) external returns (bytes32) {
+) external nonReentrant returns (bytes32) {
     MidnightModuleStorage storage $ = _getMidnightModuleStorage();
     require(msg.sender == $.midnight, MIDNIGHT_ONLY_MIDNIGHT);
     require(seller == address(this), MIDNIGHT_INVALID_SELLER);
