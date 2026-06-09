@@ -79,6 +79,11 @@ credit withdrawal, and credit sale.
 The module should be called through the MetaWallet proxy address and should
 store its state in an ERC-7201 namespaced storage slot.
 
+Important liquidity policy: MetaWallet must not automatically treat its full
+idle loan-token balance as available for Midnight fills. The admin configures an
+idle usage cap per loan token. The callback may consume at most that capped idle
+amount and must source the rest from the liquidation queue.
+
 ### 3.1 Files To Add
 
 Use these files so the feature follows the current repo layout:
@@ -111,6 +116,7 @@ interface IMidnightModule {
     event MidnightAuthorizationUpdated(address indexed authorized, bool enabled);
     event OfferTreeRatified(bytes32 indexed root, bool enabled);
     event OfferGroupCancelled(bytes32 indexed group);
+    event IdleLiquidityCapUpdated(address indexed loanToken, uint256 oldCap, uint256 newCap);
     event LiquidationQueueUpdated(address indexed loanToken, uint256 stepCount);
     event LiquidationQueueCleared(address indexed loanToken);
     event LiquidationStepExecuted(
@@ -157,6 +163,8 @@ interface IMidnightModule {
     function ratifyOfferTree(bytes32 root, bool enabled) external;
     function cancelOfferGroup(bytes32 group) external;
 
+    function setIdleLiquidityCap(address loanToken, uint256 cap) external;
+    function idleLiquidityCap(address loanToken) external view returns (uint256);
     function setLiquidationQueue(address loanToken, LiquidationStep[] calldata steps) external;
     function clearLiquidationQueue(address loanToken) external;
     function liquidationQueue(address loanToken, uint256 index) external view returns (LiquidationStep memory);
@@ -219,6 +227,7 @@ and deliver `assetsOut` of the Midnight loan token to `receiver`.
 struct MidnightModuleStorage {
     address midnight;
     address setterRatifier;
+    mapping(address loanToken => uint256 cap) idleLiquidityCaps;
     mapping(address loanToken => LiquidationStep[] steps) liquidationQueues;
 }
 ```
@@ -266,6 +275,8 @@ points, including:
 - `setMidnightAuthorization`
 - `ratifyOfferTree`
 - `cancelOfferGroup`
+- `setIdleLiquidityCap`
+- `idleLiquidityCap`
 - `setLiquidationQueue`
 - `clearLiquidationQueue`
 - `liquidationQueue`
@@ -289,7 +300,7 @@ checks should read the same `OwnableRoles` storage used by `MetaWallet` and
 Required role policy:
 
 - Admin-only: config, Midnight authorization, root ratification, group
-  cancellation, queue replacement, queue clearing.
+  cancellation, idle liquidity cap updates, queue replacement, queue clearing.
 - Executor-or-admin: `withdrawCredits` and `takeOffer`.
 - Midnight-only: `onBuy` and `onSell`.
 
@@ -384,11 +395,15 @@ Emit `OfferGroupCancelled(group)`.
 
 MetaWallet should not have to keep all Midnight lending liquidity idle. Instead,
 the admin configures a liquidation queue per loan token. When Midnight calls
-`onBuy`, the module first checks current MetaWallet loan-token balance. If that
-balance is not enough, it walks the queue and executes liquidation steps until
+`onBuy`, the module first checks how much of the current MetaWallet loan-token
+balance is allowed to be consumed by the configured idle cap. If the capped idle
+amount is not enough, it walks the queue and executes liquidation steps until
 the fill is funded.
 
-Idle balance is always source zero.
+Idle balance is always source zero, but only up to `idleLiquidityCap[loanToken]`.
+The cap defaults to `0`, meaning a newly configured loan token will not consume
+idle balance during Midnight fills until the admin opts in. To allow unlimited
+idle usage for a token, set the cap to `type(uint256).max`.
 
 The queue is intentionally lower-level than the normal hook system. A step is a
 single registry-authorized external call with optional amount injection. Complex
@@ -402,10 +417,15 @@ Each loan token has an ordered array of `LiquidationStep`.
 Execution rules:
 
 1. Compute required balance: `buyerAssets`.
-2. Read current balance of `market.loanToken` on `address(this)`.
-3. If current balance is enough, skip the queue.
-4. Otherwise compute the remaining deficit.
-5. For each enabled step in order:
+2. Read starting balance of `market.loanToken` on `address(this)`.
+3. Compute capped idle usage:
+   `usableIdle = min(startBalance, idleLiquidityCap[loanToken], buyerAssets)`.
+4. Compute protected idle:
+   `protectedIdle = startBalance - usableIdle`.
+5. Compute queue deficit: `deficit = buyerAssets - usableIdle`.
+6. If `deficit == 0`, skip the queue.
+7. Otherwise walk the queue.
+8. For each enabled step in order:
    - cap the requested output amount to `min(deficit, maxLiquidationAmount)`;
    - inject that amount into `callDataTemplate` at `amountPlaceholderOffset`;
    - snapshot `expectedOutputToken.balanceOf(address(this))`;
@@ -414,14 +434,41 @@ Execution rules:
    - require output delta is at least `minOutputAmount`, unless
      `minOutputAmount == 0`;
    - update current loan-token balance;
-   - stop as soon as the balance covers `buyerAssets`.
-6. If the full queue finishes and the loan-token balance is still insufficient,
+   - recompute `deficit = zeroFloorSub(buyerAssets + protectedIdle, currentBalance)`;
+   - stop as soon as `currentBalance >= buyerAssets + protectedIdle`.
+9. If the full queue finishes and `currentBalance < buyerAssets + protectedIdle`,
    revert.
 
 This is an "until funded" queue. It avoids unnecessary liquidations when idle
-balance or earlier sources already cover the fill.
+balance within the configured cap or earlier sources already cover the fill.
 
-### 5.3 Calldata Template Amount Injection
+The protected-idle check matters because Midnight pulls fungible tokens after
+`onBuy` returns. The module cannot choose which specific tokens Midnight pulls,
+so it must ensure that before the pull the balance is at least
+`buyerAssets + protectedIdle`. After Midnight pulls `buyerAssets`, the remaining
+balance is at least the protected idle amount.
+
+### 5.3 Idle Liquidity Cap Management
+
+The module should expose:
+
+```solidity
+setIdleLiquidityCap(address loanToken, uint256 cap)
+idleLiquidityCap(address loanToken) external view returns (uint256)
+```
+
+`setIdleLiquidityCap` should be admin-gated, reject `loanToken == address(0)`,
+store the new cap, and emit:
+
+```solidity
+event IdleLiquidityCapUpdated(address indexed loanToken, uint256 oldCap, uint256 newCap);
+```
+
+The cap is denominated in raw loan-token units. If the admin wants MetaWallet to
+use at most 100 USDC of idle balance for Midnight fills, the cap for USDC should
+be `100e6`.
+
+### 5.4 Calldata Template Amount Injection
 
 `callDataTemplate` is a complete calldata blob with one 32-byte word reserved
 for the dynamic amount.
@@ -480,7 +527,7 @@ The implementation must validate the offset before calling the assembly helper.
 The offset is counted from the first byte of calldata, so for a normal ABI call
 where the first argument is the dynamic amount, `amountPlaceholderOffset == 4`.
 
-### 5.4 Registry Enforcement
+### 5.5 Registry Enforcement
 
 Every liquidation call must pass through the same registry authorization used by
 MetaWallet hook execution. The implementation should reuse the wallet's
@@ -530,7 +577,7 @@ The exact helper implementation can use inline assembly for `_sliceParams`, as
 smart-account nonce unless the team explicitly wants queue executions reflected
 in the global execution nonce.
 
-### 5.5 Queue Management
+### 5.6 Queue Management
 
 `setLiquidationQueue(address loanToken, LiquidationStep[] calldata steps)`
 should replace the full queue for that token.
@@ -565,9 +612,10 @@ old queue and pushing each new step after validation.
 1. Admin installs `MidnightModule` selectors on MetaWallet.
 2. Admin configures Midnight and SetterRatifier.
 3. Admin authorizes SetterRatifier through `setMidnightAuthorization`.
-4. Admin configures a liquidation queue for each Midnight loan token.
-5. Admin ratifies an offer-tree root containing lender-maker offers.
-6. Offchain infrastructure publishes offers to takers or solvers.
+4. Admin configures `idleLiquidityCap` for each Midnight loan token.
+5. Admin configures a liquidation queue for each Midnight loan token.
+6. Admin ratifies an offer-tree root containing lender-maker offers.
+7. Offchain infrastructure publishes offers to takers or solvers.
 
 ### 6.2 Offer Shape
 
@@ -619,12 +667,15 @@ The module should:
 3. Decode `BuyCallbackData`.
 4. Require `id == expectedMarketId`.
 5. Require `market.loanToken != address(0)`.
-6. Source liquidity from idle balance and the liquidation queue until funded.
-7. Require final loan-token balance is at least:
+6. Compute the protected idle amount from the configured idle cap.
+7. Source liquidity from capped idle balance and the liquidation queue until
+   funded.
+8. Require final loan-token balance is at least:
    - `buyerAssets`; and
+   - `buyerAssets + protectedIdle`; and
    - `minFinalLoanTokenBalance`, if non-zero.
-8. Approve Midnight for exactly `buyerAssets`.
-9. Return Midnight's `CALLBACK_SUCCESS`.
+9. Approve Midnight for exactly `buyerAssets`.
+10. Return Midnight's `CALLBACK_SUCCESS`.
 
 After the callback returns, Midnight pulls loan tokens from the callback address.
 Because `offer.callback = address(metaWallet)`, MetaWallet is the payer.
@@ -649,10 +700,11 @@ function onBuy(
     BuyCallbackData memory callbackData = abi.decode(data, (BuyCallbackData));
     require(id == callbackData.expectedMarketId, MIDNIGHT_INVALID_MARKET);
 
-    _fundLoanToken(market.loanToken, buyerAssets);
+    uint256 protectedIdle = _fundLoanToken(market.loanToken, buyerAssets);
 
     uint256 finalBalance = IERC20(market.loanToken).balanceOf(address(this));
     require(finalBalance >= buyerAssets, MIDNIGHT_INSUFFICIENT_LIQUIDITY);
+    require(finalBalance >= buyerAssets + protectedIdle, MIDNIGHT_INSUFFICIENT_LIQUIDITY);
     if (callbackData.minFinalLoanTokenBalance != 0) {
         require(finalBalance >= callbackData.minFinalLoanTokenBalance, MIDNIGHT_INSUFFICIENT_LIQUIDITY);
     }
@@ -663,10 +715,28 @@ function onBuy(
 }
 ```
 
-`_fundLoanToken` is the queue walker described in section 5. It must use
-`IERC20(loanToken).balanceOf(address(this))`, not `VaultModule.totalIdle()`,
-because Midnight loan tokens may differ from the MetaWallet vault asset in
-future deployments.
+`_fundLoanToken` is the queue walker described in section 5. It should return
+the protected idle amount that must remain after Midnight pulls `buyerAssets`.
+It must use `IERC20(loanToken).balanceOf(address(this))`, not
+`VaultModule.totalIdle()`, because Midnight loan tokens may differ from the
+MetaWallet vault asset in future deployments.
+
+Reference funding helper shape:
+
+```solidity
+function _fundLoanToken(address loanToken, uint256 buyerAssets) internal returns (uint256 protectedIdle) {
+    MidnightModuleStorage storage $ = _getMidnightModuleStorage();
+    uint256 startBalance = IERC20(loanToken).balanceOf(address(this));
+    uint256 usableIdle = _min(_min(startBalance, $.idleLiquidityCaps[loanToken]), buyerAssets);
+    protectedIdle = startBalance - usableIdle;
+    uint256 requiredBalance = buyerAssets + protectedIdle;
+
+    if (startBalance >= requiredBalance) return protectedIdle;
+
+    _executeLiquidationQueueUntilFunded(loanToken, requiredBalance);
+    return protectedIdle;
+}
+```
 
 ### 6.4 Allowance Policy
 
@@ -856,6 +926,7 @@ Admin-gated functions:
 - `setMidnightAuthorization`
 - `ratifyOfferTree`
 - `cancelOfferGroup`
+- `setIdleLiquidityCap`
 - `setLiquidationQueue`
 - `clearLiquidationQueue`
 
@@ -923,32 +994,38 @@ receiver and owner fields set to `address(metaWallet)`.
 ### 10.1 Idle-Balance Fill
 
 1. MetaWallet has enough loan tokens idle.
-2. Taker fills lender offer.
-3. Midnight calls `onBuy`.
-4. `onBuy` sees balance covers `buyerAssets`.
-5. Queue is skipped.
-6. MetaWallet approves Midnight for exactly `buyerAssets`.
-7. Midnight pulls funds and mints credit to MetaWallet.
+2. Admin sets `idleLiquidityCap[loanToken] >= buyerAssets`.
+3. Taker fills lender offer.
+4. Midnight calls `onBuy`.
+5. `onBuy` sees capped idle balance covers `buyerAssets`.
+6. Queue is skipped.
+7. MetaWallet approves Midnight for exactly `buyerAssets`.
+8. Midnight pulls funds and mints credit to MetaWallet.
 
 ### 10.2 ERC-4626-Funded Fill
 
 1. MetaWallet loan tokens are invested in an ERC-4626 vault.
-2. Admin queue contains a step calling `vault.withdraw(amount, metaWallet, metaWallet)`.
-3. Taker fills lender offer.
-4. `onBuy` computes the deficit.
-5. The module patches the deficit into the withdraw calldata.
-6. The registry authorizes the vault withdrawal.
-7. The ERC-4626 vault sends loan tokens back to MetaWallet.
-8. The module approves Midnight for the fill amount.
-9. Midnight pulls funds and credits MetaWallet.
+2. Admin sets a small or zero idle cap for the loan token.
+3. Admin queue contains a step calling `vault.withdraw(amount, metaWallet, metaWallet)`.
+4. Taker fills lender offer.
+5. `onBuy` computes the capped-idle deficit.
+6. The module patches the deficit into the withdraw calldata.
+7. The registry authorizes the vault withdrawal.
+8. The ERC-4626 vault sends loan tokens back to MetaWallet.
+9. The module approves Midnight for the fill amount.
+10. Midnight pulls funds and credits MetaWallet.
 
 ### 10.3 Multi-Source Fill
 
 1. MetaWallet has partial idle loan-token balance.
-2. Queue step 0 withdraws from Strategy A but only covers part of the deficit.
-3. Queue step 1 withdraws from Strategy B and finishes funding the fill.
-4. The queue stops immediately after the fill is funded.
-5. Remaining strategies are untouched.
+2. Admin sets `idleLiquidityCap` below the full idle balance.
+3. `onBuy` treats only the capped amount as usable and records the rest as
+   protected idle.
+4. Queue step 0 withdraws from Strategy A but only covers part of the deficit.
+5. Queue step 1 withdraws from Strategy B and finishes funding the fill.
+6. The queue stops immediately after the fill is funded plus protected idle.
+7. After Midnight pulls `buyerAssets`, protected idle remains in MetaWallet.
+8. Remaining strategies are untouched.
 
 ### 10.4 Early Credit Sale
 
@@ -972,7 +1049,9 @@ Tests should follow the existing production-like deployment style:
 
 Required positive tests:
 
-- idle-balance-only `onBuy` fill;
+- idle-balance-only `onBuy` fill where cap covers `buyerAssets`;
+- capped-idle fill where only part of MetaWallet's idle balance may be used and
+  the protected idle remains after the Midnight pull;
 - ERC-4626 `withdraw` queue fill;
 - adapter-backed queue fill for strategies that cannot withdraw by desired
   output amount directly;
@@ -989,6 +1068,7 @@ Required negative tests:
 - `onSell` where `seller != address(metaWallet)`;
 - mismatched expected market id;
 - full queue executed but final balance is insufficient;
+- full queue executed but final balance does not preserve protected idle;
 - malformed placeholder offset;
 - registry rejection of a liquidation call;
 - queue step target revert;
@@ -1010,11 +1090,12 @@ prefer adding the module and interfaces in small steps:
 
 1. Add Midnight interfaces and module storage.
 2. Add config, authorization, ratification, and queue management.
-3. Add `onBuy` with idle-balance-only funding.
-4. Add queue execution and calldata patching.
-5. Add credit withdrawal.
-6. Add early credit sale.
-7. Add focused tests at each step.
+3. Add idle liquidity cap management.
+4. Add `onBuy` with capped-idle funding.
+5. Add queue execution and calldata patching.
+6. Add credit withdrawal.
+7. Add early credit sale.
+8. Add focused tests at each step.
 
 Follow existing MetaWallet patterns:
 
