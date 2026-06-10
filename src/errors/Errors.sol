@@ -7,6 +7,8 @@ pragma solidity ^0.8.20;
 ///      - H4D*: ERC4626ApproveAndDepositHook errors
 ///      - H4R*: ERC4626RedeemHook errors
 ///      - H1I*: OneInchSwapHook errors
+///      - MN*: MidnightModule errors
+///      - HM*: MidnightHook errors
 
 // HookExecution Errors
 string constant HOOKEXECUTION_INVALID_HOOK_ADDRESS = "HE1";
@@ -46,4 +48,25 @@ string constant HOOKONEINCH_ROUTER_NOT_ALLOWED = "H1I5";
 string constant HOOKONEINCH_RESIDUAL_SOURCE_TOKENS = "H1I6";
 string constant HOOKONEINCH_INVALID_FLAGS = "H1I7";
 string constant HOOKONEINCH_INACTIVE_CONTEXT = "H1I8";
+
+// MidnightModule Errors
+string constant MIDNIGHT_INVALID_ADDRESS = "MN1";
+string constant MIDNIGHT_NOT_CONFIGURED = "MN2";
+string constant MIDNIGHT_ONLY_MIDNIGHT = "MN3";
+string constant MIDNIGHT_UNAUTHORIZED = "MN4";
+string constant MIDNIGHT_INVALID_BUYER = "MN5";
+string constant MIDNIGHT_INVALID_SELLER = "MN6";
+string constant MIDNIGHT_INVALID_RECEIVER = "MN7";
+string constant MIDNIGHT_INVALID_MARKET = "MN8";
+string constant MIDNIGHT_INVALID_LOAN_TOKEN = "MN9";
+string constant MIDNIGHT_INVALID_LIQUIDATION_STEP = "MN10";
+string constant MIDNIGHT_INVALID_PLACEHOLDER_OFFSET = "MN11";
+string constant MIDNIGHT_LIQUIDATION_CALL_FAILED = "MN12";
+string constant MIDNIGHT_INSUFFICIENT_LIQUIDITY = "MN13";
+string constant MIDNIGHT_INSUFFICIENT_STEP_OUTPUT = "MN14";
+
+// MidnightHook Errors
+string constant HOOKMIDNIGHT_INVALID_HOOK_DATA = "HM1";
+string constant HOOKMIDNIGHT_INACTIVE_CONTEXT = "HM2";
+string constant HOOKMIDNIGHT_INSUFFICIENT_OUTPUT = "HM3";
 

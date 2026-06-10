@@ -3,12 +3,12 @@ src = "src"
 out = "out"
 libs = ["dependencies"]
 gas_reports = ['*']
-solc_version = "0.8.30"
+auto_detect_solc = true
 build_info = true
 extra_output = ["storageLayout"]
 dynamic_test_linking = true
 fs_permissions = [{ access = "read-write", path = "." }]
-evm_version = "cancun"
+evm_version = "osaka"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
@@ -44,6 +44,7 @@ minimal-smart-account = { version = "1.0", git = "https://github.com/turingcapit
 forge-std = "1.11.0"
 kam = { version = "1.0", git = "https://github.com/turingcapitalgroup/kam.git" }
 minimal-uups-factory = { version = "1.0.0", git = "https://github.com/turingcapitalgroup/minimal-uups-factory.git", rev = "f484679b34fc4ffe4f394bb3b9417e81d462fa8c" }
+midnight = { version = "1.0.0", git = "git@github.com:morpho-org/midnight.git", rev = "b458000205b580b8dd7a2083a9384611b3480615" }
 
 [soldeer]
 # whether soldeer manages remappings

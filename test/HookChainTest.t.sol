@@ -645,7 +645,7 @@ contract HookChainTest is BaseTest {
         address _evilVault = makeAddr("EvilVault");
         vm.prank(address(metaWallet));
         vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
-        depositHook.approveForDepositStatic(USDC_MAINNET, _evilVault, 1_000);
+        depositHook.approveForDepositStatic(USDC_MAINNET, _evilVault, 1000);
     }
 
     /// @notice Direct call to executeDepositStatic with a non-whitelisted vault must revert
@@ -653,7 +653,7 @@ contract HookChainTest is BaseTest {
         address _evilVault = makeAddr("EvilVault");
         vm.prank(address(metaWallet));
         vm.expectRevert(bytes(Errors.HOOK4626DEPOSIT_VAULT_NOT_ALLOWED));
-        depositHook.executeDepositStatic(_evilVault, 1_000, address(metaWallet));
+        depositHook.executeDepositStatic(_evilVault, 1000, address(metaWallet));
     }
 
     /// @notice Non-owner calling setVaultAllowed must revert with Ownable.Unauthorized

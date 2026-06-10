@@ -2,6 +2,7 @@ forge-std/=dependencies/forge-std-1.11.0/src/
 kam/=dependencies/kam-1.0/src/
 metawallet/src/=src/
 metawallet/test/=test/
+midnight/=dependencies/midnight-1.0.0/
 minimal-smart-account/=dependencies/minimal-smart-account-1.0/src/
 minimal-uups-factory/=dependencies/minimal-uups-factory-1.0.0/src/
 solady/=src/vendor/solady/
