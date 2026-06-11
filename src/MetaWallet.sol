@@ -76,41 +76,51 @@ contract MetaWallet is MinimalSmartAccount, HookExecution, MultiFacetProxy, Reen
 
         for (uint256 _i = 0; _i < _length; ++_i) {
             ++$.nonce;
-            _results[_i] = _executeOperation($.nonce, _registry, _executions[_i]);
-        }
-    }
 
-    function _executeOperation(
-        uint256 _nonce,
-        IRegistry _registry,
-        Execution memory _execution
-    )
-        private
-        returns (bytes memory _result)
-    {
-        (bytes4 _functionSig, bytes memory _params) = _callAuthorizationData(_execution.callData);
+            bytes memory _callData = _executions[_i].callData;
 
-        _registry.authorizeCall(_execution.target, _functionSig, _params);
-        _result = _execution.target.callContract(_execution.value, _execution.callData);
+            bytes4 _functionSig;
+            bytes memory _params;
 
-        emit Executed(_nonce, msg.sender, _execution.target, _execution.callData, _execution.value, _result);
-    }
+            // solhint-disable-next-line no-inline-assembly
+            assembly ("memory-safe") {
+                // Load function selector (first 4 bytes)
+                _functionSig := mload(add(_callData, 32))
+            }
 
-    function _callAuthorizationData(bytes memory _callData)
-        private
-        pure
-        returns (bytes4 _functionSig, bytes memory _params)
-    {
-        assembly ("memory-safe") {
-            _functionSig := mload(add(_callData, 32))
-        }
+            // Extract parameters if callData has more than selector
+            if (_callData.length > 4) {
+                uint256 _paramsLength = _callData.length - 4;
+                _params = new bytes(_paramsLength);
 
-        if (_callData.length <= 4) return (_functionSig, new bytes(0));
+                // solhint-disable-next-line no-inline-assembly
+                assembly ("memory-safe") {
+                    // Copy from _callData[4:] to _params
+                    let _src := add(add(_callData, 32), 4) // _callData start + length slot + 4 bytes
+                    let _dst := add(_params, 32) // _params start + length slot
 
-        uint256 _paramsLength = _callData.length - 4;
-        _params = new bytes(_paramsLength);
-        for (uint256 _i; _i < _paramsLength; ++_i) {
-            _params[_i] = _callData[_i + 4];
+                    // Copy in 32-byte chunks
+                    let _fullWords := div(_paramsLength, 32)
+                    for { let _j := 0 } lt(_j, _fullWords) { _j := add(_j, 1) } {
+                        mstore(add(_dst, mul(_j, 32)), mload(add(_src, mul(_j, 32))))
+                    }
+
+                    // Copy remaining bytes
+                    let _remaining := mod(_paramsLength, 32)
+                    if _remaining {
+                        let _mask := not(sub(shl(mul(sub(32, _remaining), 8), 1), 1))
+                        let _off := mul(_fullWords, 32)
+                        mstore(add(_dst, _off), and(mload(add(_src, _off)), _mask))
+                    }
+                }
+            } else {
+                _params = new bytes(0);
+            }
+
+            _registry.authorizeCall(_executions[_i].target, _functionSig, _params);
+            _results[_i] = _executions[_i].target.callContract(_executions[_i].value, _callData);
+
+            emit Executed($.nonce, msg.sender, _executions[_i].target, _callData, _executions[_i].value, _results[_i]);
         }
     }
 

@@ -391,7 +391,9 @@ contract MidnightModuleTest is Test {
         Market memory market = _market();
         (Offer memory offer, bytes memory ratifierData) = _ratifiedSellOfferFromAlice(market);
         IMidnightModule.BuyCallbackData memory data = IMidnightModule.BuyCallbackData({
-            expectedMarketId: IMidnight(midnight).toId(market), minFinalLoanTokenBalance: 0
+            expectedMarketId: IMidnight(midnight).toId(market),
+            withdrawalQueueId: bytes32(0),
+            minFinalLoanTokenBalance: 0
         });
 
         _executeTakeOffer(offer, ratifierData, 40 ether, address(0), address(proxy), abi.encode(data));
@@ -705,16 +707,26 @@ contract MidnightModuleTest is Test {
         );
 
         LiquidationAdapterHarness adapter = new LiquidationAdapterHarness(loanToken);
-        IMidnightModule.LiquidationStep[] memory steps = new IMidnightModule.LiquidationStep[](1);
-        steps[0] = _adapterStep(adapter, 0, 0);
-        steps[0].amountPlaceholderOffset = 0;
+        bytes32 queueId = IMidnightModule(address(proxy)).loanTokenQueueId(address(loanToken));
+        IMidnightModule.WithdrawalStep[] memory steps = new IMidnightModule.WithdrawalStep[](1);
+        steps[0] = _rawCallStep(
+            address(adapter),
+            abi.encodeWithSelector(LiquidationAdapterHarness.liquidate.selector, uint256(0), address(proxy)),
+            0,
+            0
+        );
         vm.expectRevert(bytes(MIDNIGHT_INVALID_PLACEHOLDER_OFFSET));
-        IMidnightModule(address(proxy)).setLiquidationQueue(address(loanToken), steps);
+        IMidnightModule(address(proxy)).setWithdrawalQueue(queueId, address(loanToken), steps);
+
+        steps[0] = _adapterStep(adapter, 0, 0);
+        steps[0].amountPlaceholderOffset = 4;
+        vm.expectRevert(bytes(MIDNIGHT_INVALID_LIQUIDATION_STEP));
+        IMidnightModule(address(proxy)).setWithdrawalQueue(queueId, address(loanToken), steps);
 
         steps[0] = _adapterStep(adapter, 0, 0);
         steps[0].expectedOutputToken = address(0xBAD);
         vm.expectRevert(bytes(MIDNIGHT_INVALID_LIQUIDATION_STEP));
-        IMidnightModule(address(proxy)).setLiquidationQueue(address(loanToken), steps);
+        IMidnightModule(address(proxy)).setWithdrawalQueue(queueId, address(loanToken), steps);
     }
 
     function testRegistryRejectionAndQueueRevert() public {
@@ -733,19 +745,14 @@ contract MidnightModuleTest is Test {
 
         registry.setRejected(address(adapter), LiquidationAdapterHarness.liquidate.selector, false);
         RevertingLiquidationAdapter revertingAdapter = new RevertingLiquidationAdapter();
-        IMidnightModule.LiquidationStep[] memory steps = new IMidnightModule.LiquidationStep[](1);
-        steps[0] = IMidnightModule.LiquidationStep({
-            target: address(revertingAdapter),
-            callData: abi.encodeWithSelector(
-                RevertingLiquidationAdapter.liquidate.selector, uint256(0), address(proxy)
-            ),
-            amountPlaceholderOffset: 4,
-            maxLiquidationAmount: 10 ether,
-            minOutputAmount: 0,
-            expectedOutputToken: address(loanToken),
-            enabled: true
-        });
-        IMidnightModule(address(proxy)).setLiquidationQueue(address(loanToken), steps);
+        IMidnightModule.WithdrawalStep[] memory steps = new IMidnightModule.WithdrawalStep[](1);
+        steps[0] = _rawCallStep(
+            address(revertingAdapter),
+            abi.encodeWithSelector(RevertingLiquidationAdapter.liquidate.selector, uint256(0), address(proxy)),
+            4,
+            0
+        );
+        _setDefaultQueue(steps);
         uint256 queueRevertNonce = proxy.nonce();
         vm.expectRevert(bytes(MIDNIGHT_LIQUIDATION_CALL_FAILED));
         _executeTakeOfferWithNonce(
@@ -766,6 +773,65 @@ contract MidnightModuleTest is Test {
         vm.prank(alice);
         vm.expectRevert();
         IMidnightModule(address(proxy)).setIdleLiquidityCap(address(loanToken), 1);
+    }
+
+    function testOnBuyCanSelectNamedWithdrawalQueueFromCallbackData() public {
+        LiquidationAdapterHarness defaultAdapter = new LiquidationAdapterHarness(loanToken);
+        _setAdapterQueue(defaultAdapter, 0, 0);
+
+        LiquidationAdapterHarness namedAdapter = new LiquidationAdapterHarness(loanToken);
+        loanToken.mint(address(namedAdapter), 25 ether);
+        bytes32 namedQueueId = keccak256("vault.queue");
+        IMidnightModule.WithdrawalStep[] memory steps = new IMidnightModule.WithdrawalStep[](1);
+        steps[0] = _adapterStep(namedAdapter, 0, 0);
+        IMidnightModule(address(proxy)).setWithdrawalQueue(namedQueueId, address(loanToken), steps);
+
+        Market memory market = _market();
+        (Offer memory offer, bytes memory ratifierData) = _ratifiedSellOfferFromAlice(market);
+        IMidnightModule.BuyCallbackData memory data = IMidnightModule.BuyCallbackData({
+            expectedMarketId: IMidnight(midnight).toId(market),
+            withdrawalQueueId: namedQueueId,
+            minFinalLoanTokenBalance: 0
+        });
+
+        _executeTakeOffer(offer, ratifierData, 25 ether, address(0), address(proxy), abi.encode(data));
+
+        assertEq(loanToken.balanceOf(address(namedAdapter)), 0);
+        assertEq(loanToken.balanceOf(address(defaultAdapter)), 0);
+        assertEq(loanToken.balanceOf(alice), INITIAL_BALANCE + 25 ether);
+    }
+
+    function testWithdrawalQueueAdapterModeAvoidsRawCalldataPlaceholder() public {
+        LiquidationAdapterHarness adapter = new LiquidationAdapterHarness(loanToken);
+        loanToken.mint(address(adapter), 15 ether);
+        _setAdapterQueue(adapter, 0, 0);
+
+        Market memory market = _market();
+        (Offer memory offer, bytes memory ratifierData) = _ratifiedSellOfferFromAlice(market);
+        _executeTakeOffer(offer, ratifierData, 15 ether, address(0), address(proxy), abi.encode(_buyData(market, 0)));
+
+        assertEq(loanToken.balanceOf(address(adapter)), 0);
+        assertEq(loanToken.balanceOf(alice), INITIAL_BALANCE + 15 ether);
+    }
+
+    function testSellCallbackMinFinalBalanceGuard() public {
+        Market memory market = _market();
+        bytes32 id = IMidnight(midnight).toId(market);
+        bytes memory data = abi.encode(
+            IMidnightModule.SellCallbackData({
+                expectedMarketId: id, expectedReceiver: bob, minFinalLoanTokenBalance: 5 ether
+            })
+        );
+
+        vm.prank(midnight);
+        vm.expectRevert(bytes(MIDNIGHT_INSUFFICIENT_LIQUIDITY));
+        IMidnightModule(address(proxy)).onSell(id, market, 1 ether, 1 ether, 0, address(proxy), bob, data);
+
+        loanToken.mint(address(proxy), 5 ether);
+        vm.prank(midnight);
+        bytes32 result =
+            IMidnightModule(address(proxy)).onSell(id, market, 1 ether, 1 ether, 0, address(proxy), bob, data);
+        assertEq(result, midnightModule.CALLBACK_SUCCESS());
     }
 
     function testHookInvalidInactiveAndInsufficientOutputReverts() public {
@@ -872,7 +938,9 @@ contract MidnightModuleTest is Test {
         pure
         returns (IMidnightModule.BuyCallbackData memory)
     {
-        return IMidnightModule.BuyCallbackData({ expectedMarketId: id, minFinalLoanTokenBalance: minFinal });
+        return IMidnightModule.BuyCallbackData({
+            expectedMarketId: id, withdrawalQueueId: bytes32(0), minFinalLoanTokenBalance: minFinal
+        });
     }
 
     function _sellOfferFromAlice(Market memory market) internal view returns (Offer memory offer) {
@@ -963,7 +1031,9 @@ contract MidnightModuleTest is Test {
             callback: address(proxy),
             callbackData: abi.encode(
                 IMidnightModule.SellCallbackData({
-                    expectedMarketId: IMidnight(midnight).toId(market), expectedReceiver: receiver
+                    expectedMarketId: IMidnight(midnight).toId(market),
+                    expectedReceiver: receiver,
+                    minFinalLoanTokenBalance: 0
                 })
             ),
             receiverIfMakerIsSeller: receiver,
@@ -1127,62 +1197,81 @@ contract MidnightModuleTest is Test {
     )
         internal
         view
-        returns (IMidnightModule.LiquidationStep memory)
+        returns (IMidnightModule.WithdrawalStep memory)
     {
-        if (maxAmount == 0) maxAmount = type(uint128).max;
-        return IMidnightModule.LiquidationStep({
+        return IMidnightModule.WithdrawalStep({
+            kind: IMidnightModule.WithdrawalStepKind.Adapter,
             target: address(adapter),
-            callData: abi.encodeWithSelector(LiquidationAdapterHarness.liquidate.selector, uint256(0), address(proxy)),
-            amountPlaceholderOffset: 4,
-            maxLiquidationAmount: maxAmount,
-            minOutputAmount: minOutput,
-            expectedOutputToken: address(loanToken),
-            enabled: true
+            value: 0,
+            callData: "",
+            amountPlaceholderOffset: 0,
+            maxWithdrawAssets: maxAmount == 0 ? type(uint128).max : maxAmount,
+            minLoanTokenOut: minOutput,
+            expectedOutputToken: address(loanToken)
         });
+    }
+
+    function _rawCallStep(
+        address target,
+        bytes memory callData,
+        uint256 placeholderOffset,
+        uint256 minOutput
+    )
+        internal
+        view
+        returns (IMidnightModule.WithdrawalStep memory)
+    {
+        return IMidnightModule.WithdrawalStep({
+            kind: IMidnightModule.WithdrawalStepKind.RawCall,
+            target: target,
+            value: 0,
+            callData: callData,
+            amountPlaceholderOffset: placeholderOffset,
+            maxWithdrawAssets: type(uint128).max,
+            minLoanTokenOut: minOutput,
+            expectedOutputToken: address(loanToken)
+        });
+    }
+
+    function _setDefaultQueue(IMidnightModule.WithdrawalStep[] memory steps) internal {
+        IMidnightModule(address(proxy))
+            .setWithdrawalQueue(
+                IMidnightModule(address(proxy)).loanTokenQueueId(address(loanToken)), address(loanToken), steps
+            );
     }
 
     function _setAdapterQueue(LiquidationAdapterHarness adapter, uint256 maxAmount, uint256 minOutput) internal {
-        IMidnightModule.LiquidationStep[] memory steps = new IMidnightModule.LiquidationStep[](1);
+        IMidnightModule.WithdrawalStep[] memory steps = new IMidnightModule.WithdrawalStep[](1);
         steps[0] = _adapterStep(adapter, maxAmount, minOutput);
-        IMidnightModule(address(proxy)).setLiquidationQueue(address(loanToken), steps);
+        _setDefaultQueue(steps);
     }
 
     function _setTwoAdapterQueue(LiquidationAdapterHarness first, LiquidationAdapterHarness second) internal {
-        IMidnightModule.LiquidationStep[] memory steps = new IMidnightModule.LiquidationStep[](2);
+        IMidnightModule.WithdrawalStep[] memory steps = new IMidnightModule.WithdrawalStep[](2);
         steps[0] = _adapterStep(first, type(uint128).max, 0);
         steps[1] = _adapterStep(second, type(uint128).max, 0);
-        IMidnightModule(address(proxy)).setLiquidationQueue(address(loanToken), steps);
+        _setDefaultQueue(steps);
     }
 
     function _setVaultQueue(QueueVaultHarness vault, uint256 minOutput) internal {
-        IMidnightModule.LiquidationStep[] memory steps = new IMidnightModule.LiquidationStep[](1);
-        steps[0] = IMidnightModule.LiquidationStep({
-            target: address(vault),
-            callData: abi.encodeWithSelector(
-                QueueVaultHarness.withdraw.selector, uint256(0), address(proxy), address(proxy)
-            ),
-            amountPlaceholderOffset: 4,
-            maxLiquidationAmount: type(uint128).max,
-            minOutputAmount: minOutput,
-            expectedOutputToken: address(loanToken),
-            enabled: true
-        });
-        IMidnightModule(address(proxy)).setLiquidationQueue(address(loanToken), steps);
+        IMidnightModule.WithdrawalStep[] memory steps = new IMidnightModule.WithdrawalStep[](1);
+        steps[0] = _rawCallStep(
+            address(vault),
+            abi.encodeWithSelector(QueueVaultHarness.withdraw.selector, uint256(0), address(proxy), address(proxy)),
+            4,
+            minOutput
+        );
+        _setDefaultQueue(steps);
     }
 
     function _setBasicVaultQueue(BasicERC4626Vault vault, uint256 minOutput) internal {
-        IMidnightModule.LiquidationStep[] memory steps = new IMidnightModule.LiquidationStep[](1);
-        steps[0] = IMidnightModule.LiquidationStep({
-            target: address(vault),
-            callData: abi.encodeWithSelector(
-                BasicERC4626Vault.withdraw.selector, uint256(0), address(proxy), address(proxy)
-            ),
-            amountPlaceholderOffset: 4,
-            maxLiquidationAmount: type(uint128).max,
-            minOutputAmount: minOutput,
-            expectedOutputToken: address(loanToken),
-            enabled: true
-        });
-        IMidnightModule(address(proxy)).setLiquidationQueue(address(loanToken), steps);
+        IMidnightModule.WithdrawalStep[] memory steps = new IMidnightModule.WithdrawalStep[](1);
+        steps[0] = _rawCallStep(
+            address(vault),
+            abi.encodeWithSelector(BasicERC4626Vault.withdraw.selector, uint256(0), address(proxy), address(proxy)),
+            4,
+            minOutput
+        );
+        _setDefaultQueue(steps);
     }
 }

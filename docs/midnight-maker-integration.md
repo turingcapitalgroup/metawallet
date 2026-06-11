@@ -8,7 +8,7 @@ maker lender on Morpho Midnight.
 The goal is for MetaWallet to post fixed-rate Midnight offers while keeping its
 capital invested in other strategies. When an offer fills, Midnight should call
 back into MetaWallet, MetaWallet should source the required loan tokens from its
-idle balance and configured liquidation queue, and the fill should complete
+idle balance and configured withdrawal queue, and the fill should complete
 atomically.
 
 The same integration must also let MetaWallet exit Midnight credit positions:
@@ -65,7 +65,7 @@ MetaWallet address itself, which makes a facet module the right integration
 surface.
 
 Existing hooks are still useful for normal pre-fill and post-fill portfolio
-management. During the synchronous Midnight callback, the liquidation queue
+management. During the synchronous Midnight callback, the withdrawal queue
 should use direct calls or small adapters so it does not reenter
 `executeWithHookExecution`.
 
@@ -82,7 +82,7 @@ store its state in an ERC-7201 namespaced storage slot.
 Important liquidity policy: MetaWallet must not automatically treat its full
 idle loan-token balance as available for Midnight fills. The admin configures an
 idle usage cap per loan token. The callback may consume at most that capped idle
-amount and must source the rest from the liquidation queue.
+amount and must source the rest from the withdrawal queue.
 
 ### 3.1 Files To Add
 
@@ -96,9 +96,9 @@ Use these files so the feature follows the current repo layout:
   with the same signatures as Morpho Midnight.
 - `src/interfaces/ISetterRatifier.sol`: `setIsRootRatified(address,bytes32,bool)`.
 - `src/interfaces/IMidnightModule.sol`: the MetaWallet-facing interface below.
-- `src/interfaces/IStrategyLiquidationAdapter.sol`: optional standard adapter
-  interface for strategies that cannot withdraw the loan token by desired asset
-  amount directly.
+- `src/interfaces/IStrategyLiquidationAdapter.sol`: adapter interface used by
+  adapter-mode withdrawal steps for strategies that cannot withdraw the loan
+  token by desired asset amount directly.
 - `src/modules/MidnightModule.sol`: the facet implementation.
 - `test/MidnightModule.t.sol`: production-like tests using the existing
   MetaWallet deployment flow.
@@ -117,14 +117,20 @@ interface IMidnightModule {
     event OfferTreeRatified(bytes32 indexed root, bool enabled);
     event OfferGroupCancelled(bytes32 indexed group);
     event IdleLiquidityCapUpdated(address indexed loanToken, uint256 oldCap, uint256 newCap);
-    event LiquidationQueueUpdated(address indexed loanToken, uint256 stepCount);
-    event LiquidationQueueCleared(address indexed loanToken);
-    event LiquidationStepExecuted(
+    event WithdrawalQueueUpdated(
+        address indexed admin,
+        bytes32 indexed queueId,
+        address indexed loanToken,
+        uint256 length
+    );
+    event WithdrawalQueueCleared(address indexed admin, bytes32 indexed queueId);
+    event WithdrawalStepExecuted(
+        bytes32 indexed queueId,
         address indexed loanToken,
         uint256 indexed index,
-        address indexed target,
-        uint256 requestedAmount,
-        uint256 outputAmount
+        address target,
+        uint256 amountIn,
+        uint256 amountOut
     );
     event MidnightCreditWithdrawn(bytes32 indexed marketId, uint256 units, address indexed receiver);
     event MidnightOfferTaken(bytes32 indexed marketId, uint256 units, uint256 buyerAssets, uint256 sellerAssets);
@@ -136,19 +142,26 @@ interface IMidnightModule {
         address setterRatifier;
     }
 
-    struct LiquidationStep {
+    enum WithdrawalStepKind {
+        Disabled,
+        Adapter,
+        RawCall
+    }
+
+    struct WithdrawalStep {
+        WithdrawalStepKind kind;
         address target;
         uint256 value;
-        bytes callDataTemplate;
+        bytes callData;
         uint256 amountPlaceholderOffset;
-        uint256 maxLiquidationAmount;
+        uint256 maxWithdrawAssets;
+        uint256 minLoanTokenOut;
         address expectedOutputToken;
-        uint256 minOutputAmount;
-        bool enabled;
     }
 
     struct BuyCallbackData {
         bytes32 expectedMarketId;
+        bytes32 withdrawalQueueId;
         uint256 minFinalLoanTokenBalance;
     }
 
@@ -165,10 +178,11 @@ interface IMidnightModule {
 
     function setIdleLiquidityCap(address loanToken, uint256 cap) external;
     function idleLiquidityCap(address loanToken) external view returns (uint256);
-    function setLiquidationQueue(address loanToken, LiquidationStep[] calldata steps) external;
-    function clearLiquidationQueue(address loanToken) external;
-    function liquidationQueue(address loanToken, uint256 index) external view returns (LiquidationStep memory);
-    function liquidationQueueLength(address loanToken) external view returns (uint256);
+    function setWithdrawalQueue(bytes32 queueId, address loanToken, WithdrawalStep[] calldata steps) external;
+    function clearWithdrawalQueue(bytes32 queueId) external;
+    function withdrawalQueue(bytes32 queueId, uint256 index) external view returns (WithdrawalStep memory);
+    function withdrawalQueueLength(bytes32 queueId) external view returns (uint256);
+    function loanTokenQueueId(address loanToken) external pure returns (bytes32);
 
     function withdrawCredits(Market calldata market, uint256 units, address receiver) external;
     function takeOffer(
@@ -228,7 +242,16 @@ struct MidnightModuleStorage {
     address midnight;
     address setterRatifier;
     mapping(address loanToken => uint256 cap) idleLiquidityCaps;
-    mapping(address loanToken => LiquidationStep[] steps) liquidationQueues;
+    mapping(bytes32 queueId => WithdrawalQueue queue) withdrawalQueues;
+}
+```
+
+with:
+
+```solidity
+struct WithdrawalQueue {
+    address loanToken;
+    WithdrawalStep[] steps;
 }
 ```
 
@@ -277,10 +300,11 @@ points, including:
 - `cancelOfferGroup`
 - `setIdleLiquidityCap`
 - `idleLiquidityCap`
-- `setLiquidationQueue`
-- `clearLiquidationQueue`
-- `liquidationQueue`
-- `liquidationQueueLength`
+- `setWithdrawalQueue`
+- `clearWithdrawalQueue`
+- `withdrawalQueue`
+- `withdrawalQueueLength`
+- `loanTokenQueueId`
 - `withdrawCredits`
 - `takeOffer`
 - `onBuy`
@@ -389,30 +413,35 @@ offchain quote.
 
 Emit `OfferGroupCancelled(group)`.
 
-## 5. Liquidity Sourcing Queue
+## 5. Withdrawal Queue
 
 ### 5.1 Design Goal
 
 MetaWallet should not have to keep all Midnight lending liquidity idle. Instead,
-the admin configures a liquidation queue per loan token. When Midnight calls
-`onBuy`, the module first checks how much of the current MetaWallet loan-token
-balance is allowed to be consumed by the configured idle cap. If the capped idle
-amount is not enough, it walks the queue and executes liquidation steps until
-the fill is funded.
+the admin configures withdrawal queues keyed by `bytes32` queue id. Each loan
+token has a default queue id,
+`loanTokenQueueId(loanToken) == bytes32(uint256(uint160(loanToken)))`, and
+offers can select a named queue through `BuyCallbackData.withdrawalQueueId`.
+When Midnight calls `onBuy`, the module first checks how much of the current
+MetaWallet loan-token balance is allowed to be consumed by the configured idle
+cap. If the capped idle amount is not enough, it walks the selected queue and
+executes withdrawal steps until the fill is funded.
 
 Idle balance is always source zero, but only up to `idleLiquidityCap[loanToken]`.
 The cap defaults to `0`, meaning a newly configured loan token will not consume
 idle balance during Midnight fills until the admin opts in. To allow unlimited
 idle usage for a token, set the cap to `type(uint256).max`.
 
-The queue is intentionally lower-level than the normal hook system. A step is a
-single registry-authorized external call with optional amount injection. Complex
-unwinds that require multiple operations should be represented as multiple queue
-steps or as one strategy adapter call.
+The queue is intentionally lower-level than the normal hook system. A step is
+either an adapter call (`WithdrawalStepKind.Adapter`) targeting
+`IStrategyLiquidationAdapter.liquidate(assets, receiver)`, or a raw
+registry-authorized external call (`WithdrawalStepKind.RawCall`) with amount
+injection. Complex unwinds that require multiple operations should be
+represented as multiple queue steps or as one strategy adapter call.
 
 ### 5.2 Queue Semantics
 
-Each loan token has an ordered array of `LiquidationStep`.
+Each queue is an ordered array of `WithdrawalStep` bound to one loan token.
 
 Execution rules:
 
@@ -424,22 +453,25 @@ Execution rules:
    `protectedIdle = startBalance - usableIdle`.
 5. Compute queue deficit: `deficit = buyerAssets - usableIdle`.
 6. If `deficit == 0`, skip the queue.
-7. Otherwise walk the queue.
-8. For each enabled step in order:
-   - cap the requested output amount to `min(deficit, maxLiquidationAmount)`;
-   - inject that amount into `callDataTemplate` at `amountPlaceholderOffset`;
-   - snapshot `expectedOutputToken.balanceOf(address(this))`;
-   - execute `target.call{value: value}(patchedCalldata)`;
-   - compute output delta;
-   - require output delta is at least `minOutputAmount`, unless
-     `minOutputAmount == 0`;
+7. Otherwise resolve the queue id (`withdrawalQueueId` from callback data, or
+   the loan token's default queue id) and require the stored queue is either
+   empty or bound to `market.loanToken`.
+8. For each non-disabled step in order:
+   - cap the requested output amount to `min(deficit, maxWithdrawAssets)`;
+   - for `Adapter` steps, registry-authorize and call
+     `IStrategyLiquidationAdapter(target).liquidate(amountIn, address(this))`;
+   - for `RawCall` steps, inject `amountIn` into `callData` at
+     `amountPlaceholderOffset`, registry-authorize, and execute
+     `target.call{value: value}(patchedCalldata)`;
+   - compute the output as the loan-token balance delta;
+   - require the output delta is at least `minLoanTokenOut`, unless
+     `minLoanTokenOut == 0`;
    - update current loan-token balance;
-   - recompute `deficit = zeroFloorSub(buyerAssets + protectedIdle, currentBalance)`;
    - stop as soon as `currentBalance >= buyerAssets + protectedIdle`.
 9. If the full queue finishes and `currentBalance < buyerAssets + protectedIdle`,
    revert.
 
-This is an "until funded" queue. It avoids unnecessary liquidations when idle
+This is an "until funded" queue. It avoids unnecessary withdrawals when idle
 balance within the configured cap or earlier sources already cover the fill.
 
 The protected-idle check matters because Midnight pulls fungible tokens after
@@ -468,41 +500,50 @@ The cap is denominated in raw loan-token units. If the admin wants MetaWallet to
 use at most 100 USDC of idle balance for Midnight fills, the cap for USDC should
 be `100e6`.
 
-### 5.4 Calldata Template Amount Injection
+### 5.4 Step Modes And Amount Injection
 
-`callDataTemplate` is a complete calldata blob with one 32-byte word reserved
-for the dynamic amount.
+Adapter mode is the preferred path for strategy-specific withdrawal because it
+avoids raw calldata amount patching. An `Adapter` step keeps `callData` empty
+and `amountPlaceholderOffset` zero; the module encodes
+`IStrategyLiquidationAdapter.liquidate(amountIn, address(this))` itself.
 
-`amountPlaceholderOffset` is the byte offset in the calldata where the 32-byte
-amount word starts. The module should replace that word with:
+Raw-call mode remains for simple ABI calls where the amount word offset is
+well-defined. `callData` is a complete calldata blob with one 32-byte word
+reserved for the dynamic amount. `amountPlaceholderOffset` is the byte offset
+in the calldata where the 32-byte amount word starts. The module replaces that
+word with:
 
 ```solidity
-min(currentDeficit, step.maxLiquidationAmount)
+min(currentDeficit, step.maxWithdrawAssets)
 ```
 
-For v1, the injected amount must be denominated in `expectedOutputToken`, which
-must be the Midnight loan token. Therefore each queue step must target a
-function whose amount argument requests an output amount in the same token. Good
+The injected amount must be denominated in `expectedOutputToken`, which must be
+the Midnight loan token. Therefore each raw-call step must target a function
+whose amount argument requests an output amount in the same token. Good
 examples:
 
 ```solidity
+// Raw-call mode: ERC-4626 withdraw by asset amount.
 IERC4626(vault).withdraw(assets, address(metaWallet), address(metaWallet));
+// Adapter mode: strategy adapter delivering loan tokens.
 IStrategyLiquidationAdapter(adapter).liquidate(assets, address(metaWallet));
 ```
 
-Do not use a raw ERC-4626 `redeem(shares, receiver, owner)` template for v1
-unless it is wrapped by an adapter that accepts a desired asset amount. A redeem
-call's first argument is shares, not loan-token assets, so injecting the
-loan-token deficit into that field would be unit-incorrect.
+Do not use a raw ERC-4626 `redeem(shares, receiver, owner)` template unless it
+is wrapped by an adapter that accepts a desired asset amount. A redeem call's
+first argument is shares, not loan-token assets, so injecting the loan-token
+deficit into that field would be unit-incorrect.
 
-Validation requirements:
+Validation requirements per step kind:
 
-- `callDataTemplate.length >= 4`;
-- `amountPlaceholderOffset >= 4`;
-- `amountPlaceholderOffset + 32 <= callDataTemplate.length`;
-- `maxLiquidationAmount > 0`;
-- `target != address(0)`;
-- `expectedOutputToken == loanToken`.
+- `Disabled`: every other field must be zero or empty.
+- `Adapter`: `target != address(0)`, `value == 0`, empty `callData`,
+  `amountPlaceholderOffset == 0`, `maxWithdrawAssets > 0`, and
+  `expectedOutputToken == loanToken`.
+- `RawCall`: `target != address(0)`, `callData.length >= 4`,
+  `amountPlaceholderOffset >= 4`,
+  `amountPlaceholderOffset + 32 <= callData.length`, `maxWithdrawAssets > 0`,
+  and `expectedOutputToken == loanToken`.
 
 The placeholder model supports protocols with normal ABI-encoded amount
 arguments, including ERC-4626 `withdraw(assets, receiver, owner)` where the
@@ -529,7 +570,7 @@ where the first argument is the dynamic amount, `amountPlaceholderOffset == 4`.
 
 ### 5.5 Registry Enforcement
 
-Every liquidation call must pass through the same registry authorization used by
+Every withdrawal-step call must pass through the same registry authorization used by
 MetaWallet hook execution. The implementation should reuse the wallet's
 registry authorization path or provide an equivalent internal helper that:
 
@@ -542,7 +583,7 @@ This preserves MetaWallet's defense-in-depth model. An admin-configured queue is
 not enough by itself; the registry must still permit the target, selector, and
 parameters.
 
-Do not implement callback liquidation by calling
+Do not implement callback funding by calling
 `MetaWallet.executeWithHookExecution` from inside `onBuy`. `MetaWallet` already
 uses `ReentrancyGuard` on hook execution, and `onBuy` should also be guarded.
 Calling the hook executor from the callback would therefore either revert or
@@ -579,10 +620,15 @@ in the global execution nonce.
 
 ### 5.6 Queue Management
 
-`setLiquidationQueue(address loanToken, LiquidationStep[] calldata steps)`
-should replace the full queue for that token.
+`setWithdrawalQueue(bytes32 queueId, address loanToken, WithdrawalStep[] calldata steps)`
+should replace the full queue for that queue id and bind it to `loanToken`.
 
-`clearLiquidationQueue(address loanToken)` should delete the queue.
+`clearWithdrawalQueue(bytes32 queueId)` should delete the queue.
+
+`withdrawalQueue(bytes32 queueId, uint256 index)` and
+`withdrawalQueueLength(bytes32 queueId)` expose the stored steps.
+`loanTokenQueueId(address loanToken)` returns the default queue id for a loan
+token.
 
 Replacing the full queue is preferred over per-index mutation because it avoids
 partial updates and makes offchain review easier.
@@ -590,18 +636,24 @@ partial updates and makes offchain review easier.
 The module should emit:
 
 ```solidity
-event LiquidationQueueUpdated(address indexed loanToken, uint256 stepCount);
-event LiquidationQueueCleared(address indexed loanToken);
-event LiquidationStepExecuted(
+event WithdrawalQueueUpdated(
+    address indexed admin,
+    bytes32 indexed queueId,
+    address indexed loanToken,
+    uint256 length
+);
+event WithdrawalQueueCleared(address indexed admin, bytes32 indexed queueId);
+event WithdrawalStepExecuted(
+    bytes32 indexed queueId,
     address indexed loanToken,
     uint256 indexed index,
-    address indexed target,
-    uint256 requestedAmount,
-    uint256 outputAmount
+    address target,
+    uint256 amountIn,
+    uint256 amountOut
 );
 ```
 
-Queue storage should preserve full calldata templates. Because `bytes` inside a
+Queue storage should preserve full raw-call calldata. Because `bytes` inside a
 storage array can be expensive to mutate, replace the full array by deleting the
 old queue and pushing each new step after validation.
 
@@ -613,7 +665,8 @@ old queue and pushing each new step after validation.
 2. Admin configures Midnight and SetterRatifier.
 3. Admin authorizes SetterRatifier through `setMidnightAuthorization`.
 4. Admin configures `idleLiquidityCap` for each Midnight loan token.
-5. Admin configures a liquidation queue for each Midnight loan token.
+5. Admin configures a withdrawal queue for each Midnight loan token, plus any
+   named queues offers should select explicitly.
 6. Admin ratifies an offer-tree root containing lender-maker offers.
 7. Offchain infrastructure publishes offers to takers or solvers.
 
@@ -633,6 +686,7 @@ Offer({
     callback: address(metaWallet),
     callbackData: abi.encode(BuyCallbackData({
         expectedMarketId: id,
+        withdrawalQueueId: bytes32(0),
         minFinalLoanTokenBalance: 0
     })),
     receiverIfMakerIsSeller: address(0),
@@ -644,6 +698,11 @@ Offer({
 ```
 
 `expectedMarketId` should be computed with `Midnight.toId(market)`.
+
+`withdrawalQueueId` selects which configured withdrawal queue funds the fill.
+`bytes32(0)` means the default queue for the loan token
+(`loanTokenQueueId(market.loanToken)`). A non-zero value selects a named queue
+such as `keccak256("vault.queue")`.
 
 `minFinalLoanTokenBalance` should normally be `0`. Midnight passes the actual
 fill requirement as the live `buyerAssets` callback argument, and `onBuy` must
@@ -668,7 +727,7 @@ The module should:
 4. Require `id == expectedMarketId`.
 5. Require `market.loanToken != address(0)`.
 6. Compute the protected idle amount from the configured idle cap.
-7. Source liquidity from capped idle balance and the liquidation queue until
+7. Source liquidity from capped idle balance and the selected withdrawal queue until
    funded.
 8. Require final loan-token balance is at least:
    - `buyerAssets`; and
@@ -733,7 +792,7 @@ function _fundLoanToken(address loanToken, uint256 buyerAssets) internal returns
 
     if (startBalance >= requiredBalance) return protectedIdle;
 
-    _executeLiquidationQueueUntilFunded(loanToken, requiredBalance);
+    _executeWithdrawalQueueUntilFunded(queueId, loanToken, requiredBalance);
     return protectedIdle;
 }
 ```
@@ -927,8 +986,8 @@ Admin-gated functions:
 - `ratifyOfferTree`
 - `cancelOfferGroup`
 - `setIdleLiquidityCap`
-- `setLiquidationQueue`
-- `clearLiquidationQueue`
+- `setWithdrawalQueue`
+- `clearWithdrawalQueue`
 
 Executor-gated or admin/executor-gated functions:
 
@@ -944,12 +1003,12 @@ Callback functions must be callable by Midnight only.
 
 ### 9.2 Reentrancy
 
-`onBuy` performs external calls to liquidation targets and then approves
+`onBuy` performs external calls to withdrawal targets and then approves
 Midnight. It should be protected by a non-reentrant guard compatible with
 MetaWallet storage.
 
 The design should account for the fact that `onBuy` is called in the middle of
-`Midnight.take`. If a liquidation target can reenter MetaWallet, registry and
+`Midnight.take`. If a withdrawal target can reenter MetaWallet, registry and
 role checks must still hold.
 
 ### 9.3 Market Binding
@@ -964,20 +1023,19 @@ but different maturity, gates, collateral, or risk parameters.
 
 The module should reject malformed queue steps:
 
-- zero target;
-- invalid amount placeholder offset;
-- empty calldata;
-- zero `maxLiquidationAmount`;
-- disabled step where all fields are non-zero, if the implementation chooses to
-  enforce clean disabled entries.
+- zero target for `Adapter` or `RawCall` steps;
+- invalid amount placeholder offset for `RawCall` steps;
+- empty calldata for `RawCall` steps, or non-empty calldata for `Adapter` steps;
+- zero `maxWithdrawAssets`;
+- disabled step where any field is non-zero.
 
 Queue execution should revert if a step fails. Continuing after a failed
-liquidation would hide solvency problems and could leave the Midnight fill
+withdrawal would hide solvency problems and could leave the Midnight fill
 unfunded.
 
 ### 9.5 Registry Policy
 
-The registry must allow every external liquidation target and selector used by
+The registry must allow every external withdrawal target and selector used by
 the queue. Examples:
 
 - ERC-4626 vault `withdraw(uint256,address,address)`;
@@ -1045,7 +1103,7 @@ Tests should follow the existing production-like deployment style:
 3. Install existing hooks.
 4. Install `MidnightModule` selectors.
 5. Configure the registry.
-6. Configure Midnight, SetterRatifier, and liquidation queues.
+6. Configure Midnight, SetterRatifier, and withdrawal queues.
 
 Required positive tests:
 
@@ -1070,7 +1128,7 @@ Required negative tests:
 - full queue executed but final balance is insufficient;
 - full queue executed but final balance does not preserve protected idle;
 - malformed placeholder offset;
-- registry rejection of a liquidation call;
+- registry rejection of a withdrawal-step call;
 - queue step target revert;
 - final balance below `minFinalLoanTokenBalance`;
 - unauthorized caller attempts to update config or queue.

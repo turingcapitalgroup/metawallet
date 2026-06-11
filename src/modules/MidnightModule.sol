@@ -8,6 +8,7 @@ import { IModule } from "kam/interfaces/modules/IModule.sol";
 import { IERC20 } from "metawallet/src/interfaces/IERC20.sol";
 import { IMidnight, Market } from "metawallet/src/interfaces/IMidnight.sol";
 import { IMidnightModule } from "metawallet/src/interfaces/IMidnightModule.sol";
+import { IStrategyLiquidationAdapter } from "metawallet/src/interfaces/IStrategyLiquidationAdapter.sol";
 import { IRegistry } from "minimal-smart-account/interfaces/IRegistry.sol";
 
 import {
@@ -36,10 +37,15 @@ contract MidnightModule is IMidnightModule, OwnableRoles, IModule {
 
     bytes32 public constant CALLBACK_SUCCESS = keccak256("morpho.midnight.callbackSuccess");
 
+    struct WithdrawalQueue {
+        address loanToken;
+        WithdrawalStep[] steps;
+    }
+
     struct MidnightModuleStorage {
         address midnight;
         mapping(address => uint256) idleLiquidityCaps;
-        mapping(address => LiquidationStep[]) liquidationQueues;
+        mapping(bytes32 queueId => WithdrawalQueue) withdrawalQueues;
     }
 
     struct MinimalAccountStorage {
@@ -101,49 +107,58 @@ contract MidnightModule is IMidnightModule, OwnableRoles, IModule {
         return _getMidnightModuleStorage().idleLiquidityCaps[_loanToken];
     }
 
-    function setLiquidationQueue(address _loanToken, LiquidationStep[] calldata _steps) external {
+    /// @notice Default withdrawal queue id for a loan token.
+    function loanTokenQueueId(address _loanToken) public pure returns (bytes32 _queueId) {
+        return bytes32(uint256(uint160(_loanToken)));
+    }
+
+    function setWithdrawalQueue(bytes32 _queueId, address _loanToken, WithdrawalStep[] calldata _steps) external {
         _checkAdminRole();
+        require(_queueId != bytes32(0), MIDNIGHT_INVALID_LIQUIDATION_STEP);
         require(_loanToken != address(0), MIDNIGHT_INVALID_LOAN_TOKEN);
 
         MidnightModuleStorage storage $ = _getMidnightModuleStorage();
-        LiquidationStep[] storage _queue = $.liquidationQueues[_loanToken];
-        delete $.liquidationQueues[_loanToken];
+        WithdrawalQueue storage _queue = $.withdrawalQueues[_queueId];
+        delete $.withdrawalQueues[_queueId];
+        _queue.loanToken = _loanToken;
 
         uint256 _length = _steps.length;
         for (uint256 _i; _i < _length; ++_i) {
-            LiquidationStep calldata _step = _steps[_i];
-            _validateLiquidationStep(_loanToken, _step);
-            _queue.push(
-                LiquidationStep({
-                    target: _step.target,
-                    callData: _step.callData,
-                    amountPlaceholderOffset: _step.amountPlaceholderOffset,
-                    maxLiquidationAmount: _step.maxLiquidationAmount,
-                    minOutputAmount: _step.minOutputAmount,
-                    expectedOutputToken: _step.expectedOutputToken,
-                    enabled: _step.enabled
-                })
-            );
+            WithdrawalStep calldata _step = _steps[_i];
+            _validateWithdrawalStep(_loanToken, _step);
+            _queue.steps
+                .push(
+                    WithdrawalStep({
+                        kind: _step.kind,
+                        target: _step.target,
+                        value: _step.value,
+                        callData: _step.callData,
+                        amountPlaceholderOffset: _step.amountPlaceholderOffset,
+                        maxWithdrawAssets: _step.maxWithdrawAssets,
+                        minLoanTokenOut: _step.minLoanTokenOut,
+                        expectedOutputToken: _step.expectedOutputToken
+                    })
+                );
         }
 
-        emit LiquidationQueueUpdated(msg.sender, _loanToken, _length);
+        emit WithdrawalQueueUpdated(msg.sender, _queueId, _loanToken, _length);
     }
 
-    function clearLiquidationQueue(address _loanToken) external {
+    function clearWithdrawalQueue(bytes32 _queueId) external {
         _checkAdminRole();
-        require(_loanToken != address(0), MIDNIGHT_INVALID_LOAN_TOKEN);
+        require(_queueId != bytes32(0), MIDNIGHT_INVALID_LIQUIDATION_STEP);
 
-        delete _getMidnightModuleStorage().liquidationQueues[_loanToken];
+        delete _getMidnightModuleStorage().withdrawalQueues[_queueId];
 
-        emit LiquidationQueueCleared(msg.sender, _loanToken);
+        emit WithdrawalQueueCleared(msg.sender, _queueId);
     }
 
-    function liquidationQueue(address _loanToken, uint256 _index) external view returns (LiquidationStep memory _step) {
-        return _getMidnightModuleStorage().liquidationQueues[_loanToken][_index];
+    function withdrawalQueue(bytes32 _queueId, uint256 _index) external view returns (WithdrawalStep memory _step) {
+        return _getMidnightModuleStorage().withdrawalQueues[_queueId].steps[_index];
     }
 
-    function liquidationQueueLength(address _loanToken) external view returns (uint256 _length) {
-        return _getMidnightModuleStorage().liquidationQueues[_loanToken].length;
+    function withdrawalQueueLength(bytes32 _queueId) external view returns (uint256 _length) {
+        return _getMidnightModuleStorage().withdrawalQueues[_queueId].steps.length;
     }
 
     function onBuy(
@@ -175,7 +190,11 @@ contract MidnightModule is IMidnightModule, OwnableRoles, IModule {
             );
         }
 
-        _fundLoanToken($, _market.loanToken, _buyerAssets, _callbackData.minFinalLoanTokenBalance);
+        bytes32 _queueId = _callbackData.withdrawalQueueId == bytes32(0)
+            ? loanTokenQueueId(_market.loanToken)
+            : _callbackData.withdrawalQueueId;
+
+        _fundLoanToken($, _queueId, _market.loanToken, _buyerAssets, _callbackData.minFinalLoanTokenBalance);
         _market.loanToken.safeApproveWithRetry(_midnightAddress, _buyerAssets);
 
         emit BuyCallback(_id, _buyer, _market.loanToken, _buyerAssets, _units);
@@ -214,6 +233,11 @@ contract MidnightModule is IMidnightModule, OwnableRoles, IModule {
                 _callbackData.expectedReceiver == address(0) || _callbackData.expectedReceiver == _receiver,
                 MIDNIGHT_INVALID_RECEIVER
             );
+            require(
+                _callbackData.minFinalLoanTokenBalance == 0
+                    || IERC20(_market.loanToken).balanceOf(address(this)) >= _callbackData.minFinalLoanTokenBalance,
+                MIDNIGHT_INSUFFICIENT_LIQUIDITY
+            );
         }
 
         emit SellCallback(_id, _seller, _receiver, _sellerAssets, _units);
@@ -221,39 +245,50 @@ contract MidnightModule is IMidnightModule, OwnableRoles, IModule {
     }
 
     function selectors() external pure returns (bytes4[] memory _selectors) {
-        _selectors = new bytes4[](9);
+        _selectors = new bytes4[](10);
         _selectors[0] = this.setMidnightConfig.selector;
         _selectors[1] = this.setIdleLiquidityCap.selector;
         _selectors[2] = this.idleLiquidityCap.selector;
-        _selectors[3] = this.setLiquidationQueue.selector;
-        _selectors[4] = this.clearLiquidationQueue.selector;
-        _selectors[5] = this.liquidationQueue.selector;
-        _selectors[6] = this.liquidationQueueLength.selector;
-        _selectors[7] = this.onBuy.selector;
-        _selectors[8] = this.onSell.selector;
+        _selectors[3] = this.setWithdrawalQueue.selector;
+        _selectors[4] = this.clearWithdrawalQueue.selector;
+        _selectors[5] = this.withdrawalQueue.selector;
+        _selectors[6] = this.withdrawalQueueLength.selector;
+        _selectors[7] = this.loanTokenQueueId.selector;
+        _selectors[8] = this.onBuy.selector;
+        _selectors[9] = this.onSell.selector;
         return _selectors;
     }
 
-    function _validateLiquidationStep(address _loanToken, LiquidationStep calldata _step) internal pure {
-        if (!_step.enabled) {
+    function _validateWithdrawalStep(address _loanToken, WithdrawalStep calldata _step) internal pure {
+        if (_step.kind == WithdrawalStepKind.Disabled) {
             require(
-                _step.target == address(0) && _step.callData.length == 0 && _step.amountPlaceholderOffset == 0
-                    && _step.maxLiquidationAmount == 0 && _step.minOutputAmount == 0
+                _step.target == address(0) && _step.value == 0 && _step.callData.length == 0
+                    && _step.amountPlaceholderOffset == 0 && _step.maxWithdrawAssets == 0 && _step.minLoanTokenOut == 0
                     && _step.expectedOutputToken == address(0),
                 MIDNIGHT_INVALID_LIQUIDATION_STEP
             );
-            return;
+        } else if (_step.kind == WithdrawalStepKind.Adapter) {
+            require(
+                _step.target != address(0) && _step.value == 0 && _step.callData.length == 0
+                    && _step.amountPlaceholderOffset == 0 && _step.maxWithdrawAssets > 0
+                    && _step.expectedOutputToken == _loanToken,
+                MIDNIGHT_INVALID_LIQUIDATION_STEP
+            );
+        } else if (_step.kind == WithdrawalStepKind.RawCall) {
+            require(
+                _step.target != address(0) && _step.callData.length >= 4 && _step.maxWithdrawAssets > 0
+                    && _step.expectedOutputToken == _loanToken,
+                MIDNIGHT_INVALID_LIQUIDATION_STEP
+            );
+            _validatePlaceholderOffset(_step.callData.length, _step.amountPlaceholderOffset);
+        } else {
+            revert(MIDNIGHT_INVALID_LIQUIDATION_STEP);
         }
-
-        require(_step.target != address(0), MIDNIGHT_INVALID_LIQUIDATION_STEP);
-        require(_step.callData.length >= 4, MIDNIGHT_INVALID_LIQUIDATION_STEP);
-        require(_step.maxLiquidationAmount > 0, MIDNIGHT_INVALID_LIQUIDATION_STEP);
-        require(_step.expectedOutputToken == _loanToken, MIDNIGHT_INVALID_LIQUIDATION_STEP);
-        _validatePlaceholderOffset(_step.callData.length, _step.amountPlaceholderOffset);
     }
 
     function _fundLoanToken(
         MidnightModuleStorage storage $,
+        bytes32 _queueId,
         address _loanToken,
         uint256 _buyerAssets,
         uint256 _minFinalLoanTokenBalance
@@ -268,7 +303,7 @@ contract MidnightModule is IMidnightModule, OwnableRoles, IModule {
         uint256 _balance = _initialBalance;
 
         if (_balance < _targetBalance) {
-            _executeLiquidationQueueUntilFunded($, _loanToken, _targetBalance, _balance);
+            _executeWithdrawalQueueUntilFunded($, _queueId, _loanToken, _targetBalance, _balance);
             _balance = IERC20(_loanToken).balanceOf(address(this));
         }
 
@@ -279,37 +314,53 @@ contract MidnightModule is IMidnightModule, OwnableRoles, IModule {
         emit LoanTokenFunded(_loanToken, _buyerAssets, _usableIdle, _balance - _initialBalance);
     }
 
-    function _executeLiquidationQueueUntilFunded(
+    function _executeWithdrawalQueueUntilFunded(
         MidnightModuleStorage storage $,
+        bytes32 _queueId,
         address _loanToken,
         uint256 _targetBalance,
         uint256 _startingBalance
     )
         internal
     {
-        LiquidationStep[] storage _queue = $.liquidationQueues[_loanToken];
-        uint256 _length = _queue.length;
+        WithdrawalQueue storage _queue = $.withdrawalQueues[_queueId];
+        uint256 _length = _queue.steps.length;
+        require(
+            (_queue.loanToken == address(0) && _length == 0) || _queue.loanToken == _loanToken,
+            MIDNIGHT_INVALID_LOAN_TOKEN
+        );
+
         uint256 _balance = _startingBalance;
 
         for (uint256 _i; _i < _length && _balance < _targetBalance; ++_i) {
-            LiquidationStep storage _step = _queue[_i];
-            if (!_step.enabled) continue;
+            WithdrawalStep storage _step = _queue.steps[_i];
+            if (_step.kind == WithdrawalStepKind.Disabled) continue;
 
             uint256 _needed = _targetBalance - _balance;
-            uint256 _amountIn = _needed < _step.maxLiquidationAmount ? _needed : _step.maxLiquidationAmount;
-            bytes memory _callData = _step.callData;
-            _patchAmount(_callData, _step.amountPlaceholderOffset, _amountIn);
+            uint256 _amountIn = _needed < _step.maxWithdrawAssets ? _needed : _step.maxWithdrawAssets;
 
-            _authorizeCall(_step.target, _callData);
             uint256 _before = IERC20(_loanToken).balanceOf(address(this));
-            (bool _success,) = _step.target.call(_callData);
-            require(_success, MIDNIGHT_LIQUIDATION_CALL_FAILED);
+
+            if (_step.kind == WithdrawalStepKind.Adapter) {
+                bytes memory _adapterCallData =
+                    abi.encodeCall(IStrategyLiquidationAdapter.liquidate, (_amountIn, address(this)));
+                _authorizeCall(_step.target, _adapterCallData);
+                IStrategyLiquidationAdapter(_step.target).liquidate(_amountIn, address(this));
+            } else {
+                bytes memory _callData = _step.callData;
+                _patchAmount(_callData, _step.amountPlaceholderOffset, _amountIn);
+
+                _authorizeCall(_step.target, _callData);
+                (bool _success,) = _step.target.call{ value: _step.value }(_callData);
+                require(_success, MIDNIGHT_LIQUIDATION_CALL_FAILED);
+            }
+
             uint256 _after = IERC20(_loanToken).balanceOf(address(this));
             uint256 _amountOut = _after - _before;
-            require(_amountOut >= _step.minOutputAmount, MIDNIGHT_INSUFFICIENT_STEP_OUTPUT);
+            require(_amountOut >= _step.minLoanTokenOut, MIDNIGHT_INSUFFICIENT_STEP_OUTPUT);
 
             _balance = _after;
-            emit LiquidationStepExecuted(_loanToken, _i, _step.target, _amountIn, _amountOut);
+            emit WithdrawalStepExecuted(_queueId, _loanToken, _i, _step.target, _amountIn, _amountOut);
         }
     }
 
